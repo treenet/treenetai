@@ -16,17 +16,17 @@ This project uses machine learning models to process time series data. The tool 
 
 I have created a tool that uses machine learning models to process data in the form of time series. Therefore, as input I have a time series and as output a modified version of the original time series. The directory structure of my files is the following:
 
-TreeNetAI/
-	|-- models/
-	|-- raw_data_elaboration/
-	|-- utils/
-	|-- scripts/
-		|-- create_tfrecords.sh
-		|-- train_model.sh
-		|-- evaluate_model.sh
-	|-- README.md
-	|-- config.py
-	|-- training.py
+TreeNetAI/\
+	|-- models/\
+	|-- raw_data_elaboration/\
+	|-- utils/\
+	|-- scripts/\
+		|-- create_tfrecords.sh\
+		|-- train_model.sh\
+		|-- evaluate_model.sh\
+	|-- README.md\
+	|-- config.py\
+	|-- training.py\
 	|-- evaluation.py
 
 The first step of the tool is the elaboration of the raw data, before it can be used as input. There is a script (load_and_convert_raw_data.py) that downloads the raw data and corresponding metadata directly from a PostgreSQL database. The raw data is processed so that it can be used as input for the machine learning models. In particular, there is a script (tfrecord_make.py) that combines the downloaded data and metadata into the tfrecords format, so that the neural network training input and corresponding labels are always together in the tfrecords data structure. The second part of the project is the training phase. The main script for this phase is the training.py file. It is combined with the utils.py script to load the tfrecords (with the help of the tfrecords_load.py script), to load the desired model (with the help of the get_model.py script) and to train the neural network. The architecture of each model is stored in a separate python script inside the "models" directory. The hyperparameters and other parameters for the training of the model are stored in the config.py file. There is a bash script that is used to call the tfrecord_make.py script that initiates the creation of the tfrecords. There is a second bash script that calls the training.py function together with the variables from the config.py file. There is a third bash script that calls the evaluate.py file to evaluate the model. 
