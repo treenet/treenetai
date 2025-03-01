@@ -21,9 +21,9 @@ TreeNetAI/\
 	|-- raw_data_elaboration/\
 	|-- utils/\
 	|-- scripts/\
-		|-- create_tfrecords.sh\
-		|-- train_model.sh\
-		|-- evaluate_model.sh\
+		  |-- create_tfrecords.sh\
+		  |-- train_model.sh\
+		  |-- evaluate_model.sh\
 	|-- README.md\
 	|-- config.py\
 	|-- training.py\
