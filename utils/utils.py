@@ -10,7 +10,7 @@ import zipfile
 import tensorflow as tf
 
 from config import CONSTANTS as C
-from apps.raw_data_elaboration.tfrecords_load import (
+from raw_data_elaboration.tfrecords_load import (
     get_dataset_dim,
     get_dataset,
     preprocess_data,
