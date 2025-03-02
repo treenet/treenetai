@@ -1,14 +1,14 @@
-from models.autoencoder2D import autoencoder2D
-from models.LSTM_CNN import LSTM_CNN
-from models.LSTM_encoder import LSTM_encoder
+from codes.treenetai.models.gapfilling_autoencoder2D import gapfilling_autoencoder2D
+from codes.treenetai.models.gapfilling_LSTM_CNN import gapfilling_LSTM_CNN
+from codes.treenetai.models.gapfilling_LSTM_encoder import gapfilling_LSTM_encoder
 
 
 def get_model(model, **kwargs):
-    if model == "autoencoder2D":
-        return autoencoder2D(**kwargs)
-    elif model == "LSTM_CNN":
-        return LSTM_CNN(**kwargs)
-    elif model == "LSTM_encoder":
-        return LSTM_encoder(**kwargs)
+    if model == "gapfilling_autoencoder2D":
+        return gapfilling_autoencoder2D(**kwargs)
+    elif model == "gapfilling_LSTM_CNN":
+        return gapfilling_LSTM_CNN(**kwargs)
+    elif model == "gapfilling_LSTM_encoder":
+        return gapfilling_LSTM_encoder(**kwargs)
     else:
         raise ValueError(f"Unknown model_name {model}")
