@@ -1,4 +1,5 @@
 # TreeNetAI
+![TreeNetGap Logo](logo.png)
 ## A Toolbox designed around neural networks for time series analysis
 
 <!--Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors. -->
@@ -6,7 +7,7 @@
 This toolbox uses machine learning methods to process data in the form of time series. Therefore, as input I have a time series and as output a modified version of the original time series. The directory structure of my files is the following:
 
 
-## Directory Structure 
+## Directory Structure
 
 - `models/`: Contains the architecture of each model.
 - `raw_data_elaboration/`: Scripts for downloading, processing, and converting raw data.
