@@ -6,7 +6,7 @@
 This toolbox uses machine learning methods to process data in the form of time series. Therefore, as input I have a time series and as output a modified version of the original time series. The directory structure of my files is the following:
 
 
-## Directory Structure
+## Directory Structure 
 
 - `models/`: Contains the architecture of each model.
 - `raw_data_elaboration/`: Scripts for downloading, processing, and converting raw data.
