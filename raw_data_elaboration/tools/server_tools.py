@@ -5,8 +5,8 @@ import pandas as pd
 # https://www.psycopg.org/docs/usage.html
 
 
-def _make_connection(USERNAME, PASSWORD, HOST, PORT, DATABASE):
-    cnx = psycopg2.connect(user=USERNAME,
+def _make_connection(USER, PASSWORD, HOST, PORT, DBNAME):
+    cnx = psycopg2.connect(user=USER,
                            password=PASSWORD,
                            host=HOST,
                            port=PORT,
@@ -20,8 +20,8 @@ def _close_connection(cnx, cursor_cnx):
     cnx.close()
 
 
-def get_metadata():
-    cnx, cursor_cnx = _make_connection()
+def get_metadata(USER, PASSWORD, HOST, PORT, DBNAME):
+    cnx, cursor_cnx = _make_connection(USER, PASSWORD, HOST, PORT, DBNAME)
     query = ('SELECT measure_point, series_id,'
              'series_start,'
              'series_stop,'

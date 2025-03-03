@@ -1,5 +1,9 @@
 # TreeNetAI
-![TreeNetGap Logo](logo.png)
+<p align="center">
+	<img src="images/logo.png" width=auto, height=300px, hspace="10px">
+	<img src="images/dendrometer.webp" width=auto, height=300px>
+</p>
+
 ## A Toolbox designed around neural networks for time series analysis
 
 <!--Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors. -->
@@ -24,9 +28,10 @@ TreeNetAI/
 	|-- raw_data_elaboration/
 	|-- utils/
 	|-- scripts/
-		|-- create_tfrecords.sh
-		|-- train_model.sh
-		|-- evaluate_model.sh
+		|-- 1_make_tfrecords.sh
+		|-- 2_train_model.sh
+		|-- 3_evaluate_model.sh
+		|-- 4_fill_gaps.sh
 	|-- README.md
 	|-- config.py
 	|-- training.py
@@ -76,8 +81,7 @@ We are open and happy to collaborate with others on this project. If you are int
 ## Authors and acknowledgment
 <!-- Show your appreciation to those who have contributed to the project. -->
 The idea behind the project is published in the following manuscirpt: [Reconstructing radial stem size changes of trees with machine learning](https://royalsocietypublishing.org/doi/10.1098/rsif.2022.0349).
-
-The full development and deployment of the code was made possible by the **Open Research Data Program of the ETH Board** ([link](https://open-research-data-portal.ch/projects/ai-module-for-gap-filling-treenet-time-series/)).
+The initial development and deployment of the code was made possible by the **Open Research Data Program of the ETH Board** ([link](https://open-research-data-portal.ch/projects/ai-module-for-gap-filling-treenet-time-series/)).
 
 ## License
 <!-- For open source projects, say how it is licensed. -->

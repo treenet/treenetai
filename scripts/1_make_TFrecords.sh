@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # NOTE: O P T I O N S   &   I N S T R U C T I O N S
 #----------------------------------------------------------------------------------------------------------------------#
@@ -26,9 +26,9 @@
 #----------------------------------------------------------------------------------------------------------------------#
 # NOTE: END
 
-dataPath=/Users/lukovic/data/FORWARDS/TNT/raw_data/data_Server.pkl
-metadataPath=/Users/lukovic/data/FORWARDS/TNT/raw_data/metadata_server.pkl
-tfrecordsDirPath=/Users/lukovic/Data/FORWARDS/TNT/tfrecords
+dataPath=/storage/lukovic/Data/FORWARDS/treenet/raw_data/data_Server.pkl
+metadataPath=/storage/lukovic/Data/FORWARDS/treenet/raw_data/metadata_server.pkl
+tfrecordsDirPath=/home/lukovic/data/treenet/tfrecords
 
 # TODO: START
 #  1) channels_to_fix option has to be changed so that it requires a description such as dendrometer,
@@ -39,7 +39,7 @@ tfrecordsDirPath=/Users/lukovic/Data/FORWARDS/TNT/tfrecords
 # TODO: END
 
 python raw_data_elaboration/tfrecord_make.py \
-        --file_id 9 \
+        --file_id 1 \
         --data_file_path $dataPath \
         --metadata_file_path $metadataPath \
         --tfrecords_dir_path $tfrecordsDirPath\

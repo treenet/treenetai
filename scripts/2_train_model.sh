@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 export EXPERIMENTS=/storage/lukovic/Data/FORWARDS/treenet/experiments/
 export DATA=/storage/lukovic/Data/FORWARDS/treenet/processed_data/tfrecords/

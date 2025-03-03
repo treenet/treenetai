@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 export EXPERIMENTS=/Users/lukovic/Data/FORWARDS/TNT/experiments/
 export DATA=/Users/lukovic/Data/FORWARDS/TNT/tfrecords/
