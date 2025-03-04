@@ -9,6 +9,6 @@ authors:
   orcid: "https://orcid.org/0000-0001-9438-0582"
 title: "TreeNetAI"
 version: 1.0.0
-doi: 10.5281/zenodo.1234
+doi:
 date-released: 2025-03-04
 url: "https://github.com/treenet/treenetai"
