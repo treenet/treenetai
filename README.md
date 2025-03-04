@@ -62,13 +62,10 @@ There is a third bash script that calls the `evaluate.py` file to evaluate the m
 
 
 ## Support
-Contact Mirko Lukovic [lukov.github.io](lukov.github.io) for help.
+Contact [Mirko Lukovic](https://lukov.github.io) for help.
 
 ## Roadmap
 So far, the toolbox contains only a gap-filling module. More modules are planned for the near future. 
-
-### Gap-filling module
-There are considerations to integrate the gap-filling module into the TreeNetProc framework. However, it is still unclear whether that is the most efficient way to go forward. 
 
 ## Contributing
 <!-- State if you are open to contributions and what your requirements are for accepting them.
@@ -76,16 +73,24 @@ There are considerations to integrate the gap-filling module into the TreeNetPro
 For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
 
 You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser. -->
-We are open and happy to collaborate with others on this project. If you are intrested, please contact Mirko Lukovic.
+We are open and happy to collaborate with others on this project. If you are intrested, please contact [Mirko Lukovic](https://lukov.github.io).
 
 ## Authors and acknowledgment
 <!-- Show your appreciation to those who have contributed to the project. -->
-The idea behind the project is published in the following manuscirpt: [Reconstructing radial stem size changes of trees with machine learning](https://royalsocietypublishing.org/doi/10.1098/rsif.2022.0349).
-The initial development and deployment of the code was made possible by the **Open Research Data Program of the ETH Board** ([link](https://open-research-data-portal.ch/projects/ai-module-for-gap-filling-treenet-time-series/)).
+The lead authors of this project are Mirko Lukovic and Roman Zwifel. The idea behind the project is published in the following manuscirpt: [Reconstructing radial stem size changes of trees with machine learning](https://royalsocietypublishing.org/doi/10.1098/rsif.2022.0349).
+The initial development and deployment of the code was made possible by the **Open Research Data Program of the ETH Board** ([link](https://open-research-data-portal.ch/projects/ai-module-for-gap-filling-treenet-time-series/)). The host institution of the developers was the Siwss Federal Institute for Forest, Snow and Landscape Research, [WSL](https://www.wsl.ch/en/).
+
+## Citation
+If you use this software in your work, please cite it and if pertinent the accompanying scientific article. 
+
+**Software**: You can find the citation details in the top right corner of this repository, under the "**About**" section ("Cite this repository").\
+**Article**: Mirko Luković, Roman Zweifel *et al.* (2022), [Reconstructing radial stem size changes of trees with machine learning](http://doi.org/10.1098/rsif.2022.0349), J. R. Soc. Interface, 1920220349. Citation: [BibTex](files/article_citation.bib) or [ris](files/article_citation.ris) or [endnote](files/article_citation.enw).
+
+
 
 ## License
 <!-- For open source projects, say how it is licensed. -->
-GNU General Public License v3.0
+The software in this repository is licensed under the **GNU General Public License v3.0** ([GPLv3](https://choosealicense.com/licenses/gpl-3.0/)). Permissions of this strong copyleft license are conditioned on making available complete source code of licensed works and modifications, which include larger works using a licensed work, under the same license. Copyright and license notices must be preserved. Contributors provide an express grant of patent rights.
 
 
 ## Project status
