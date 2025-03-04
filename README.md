@@ -13,29 +13,48 @@ This toolbox uses machine learning methods to process data in the form of time s
 
 ## Directory Structure
 
+The main components of the software are the following:
+
 - `models/`: Contains the architecture of each model.
 - `raw_data_elaboration/`: Scripts for downloading, processing, and converting raw data.
 - `utils/`: Utility scripts for loading models and other helper functions.
-- `scripts/`: Bash scripts for creating TFRecords, training the model, and evaluating the model.
+- `scripts/`: Bash scripts for downloading raw data, creating TFRecords, training and evaluating the model, and gap-filling data.
 - `config.py`: Configuration file for hyperparameters and other settings.
 - `training.py`: Main script for training the neural network.
 - `evaluation.py`: Script for evaluating the trained model.
 
-
+In more detail, the relevan directory strucutre looks like the following:
 ```
 TreeNetAI/
 	|-- models/
+		|-- templates/
+		|-- trained/
 	|-- raw_data_elaboration/
-	|-- utils/
+		|-- tools/
+			|-- config_server.yml (not included)
+			|-- data_organisation.py
+			|-- data_statistics.py
+			|-- server_tools.py
+		|-- data_processing_library.py
+		|-- feature_descriptions.py
+		|-- load_and_convert_raw_data.py
+		|-- tfrecords_make.py
+		|-- tfrecords_load.py
 	|-- scripts/
+		|-- 0_get_data.sh
 		|-- 1_make_tfrecords.sh
 		|-- 2_train_model.sh
 		|-- 3_evaluate_model.sh
 		|-- 4_fill_gaps.sh
-	|-- README.md
+	|-- utils/
+		|-- evaluation_tools.py
+		|-- get_model.py
+		|-- logger.py
+		|-- utils.py
 	|-- config.py
-	|-- training.py
 	|-- evaluation.py
+	|-- training.py
+
 ```
 
 <!-- ## Badges
