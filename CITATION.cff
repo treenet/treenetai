@@ -1,0 +1,14 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+- family-names: "Lukovic"
+  given-names: "Mirko"
+  orcid: "http://orcid.org/0000-0003-0694-1621"
+- family-names: "Zweifel"
+  given-names: "Roman"
+  orcid: "https://orcid.org/0000-0001-9438-0582"
+title: "TreeNetAI"
+version: 1.0.0
+doi:
+date-released: 2025-03-04
+url: "https://github.com/treenet/treenetai"
