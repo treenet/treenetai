@@ -10,6 +10,18 @@
 
 This toolbox uses machine learning methods to process data in the form of time series. Therefore, as input I have a time series and as output a modified version of the original time series. The directory structure of my files is the following:
 
+## Background
+
+TreeNet ([treenet.info](https://treenet.info)) is an international monitoring and research network in which automated tree stem radius fluctuations measured with [point dendrometers](https://treenet.info/methods/) are analyzed in terms of forest ecosystem responses to climate change. A continuous stream of microclimate and tree physiology data provides realtime information on tree water relations and tree growth.
+
+TreeNet aims to link research results from carbon flux sites with dendrometer data to entire landscapes. Further it provides online-tools to its partners to automatically interpret stem radius fluctuations in terms of tree water deficit, wood growth and related indicators for forest ecosystem carbon sink and drought stress.
+
+The project was initiated by Roman Zweifel, WSL and Werner Eugster, ETHZ in 2009 and is supported by an increasing number of [partners](https://treenet.info/switzerland/).
+
+<p align="center">
+	<img src="images/dendrometers.jpg" width=auto, height=250>
+</p>
+
 
 ## Directory Structure
 
