@@ -114,7 +114,7 @@ We are open and happy to collaborate with others on this project. If you are int
 
 ## Authors and acknowledgment
 <!-- Show your appreciation to those who have contributed to the project. -->
-The lead authors of this project are Mirko Lukovic and Roman Zwifel. The idea behind the project is published in the following manuscirpt: [Reconstructing radial stem size changes of trees with machine learning](https://royalsocietypublishing.org/doi/10.1098/rsif.2022.0349).
+The lead authors of the TreeNetAI project are Mirko Lukovic and Roman Zwifel. The idea behind the project is published in the following manuscirpt: [Reconstructing radial stem size changes of trees with machine learning](https://royalsocietypublishing.org/doi/10.1098/rsif.2022.0349).
 The initial development and deployment of the code was made possible by the **Open Research Data Program of the ETH Board** ([link](https://open-research-data-portal.ch/projects/ai-module-for-gap-filling-treenet-time-series/)). The host institution of the developers was the Siwss Federal Institute for Forest, Snow and Landscape Research, [WSL](https://www.wsl.ch/en/).
 
 ## Citation
@@ -128,7 +128,7 @@ If you use this software in your work, please cite it and the accompanying scien
 
 ## License
 <!-- For open source projects, say how it is licensed. -->
-The software in this repository is licensed under the **GNU General Public License v3.0** ([GPLv3](https://choosealicense.com/licenses/gpl-3.0/)). Permissions of this strong copyleft license are conditioned on making available complete source code of licensed works and modifications, which include larger works using a licensed work, under the same license. Copyright and license notices must be preserved. Contributors provide an express grant of patent rights.
+All of the software in this repository is licensed under the **GNU General Public License v3.0** ([GPLv3](https://choosealicense.com/licenses/gpl-3.0/)). Permissions of this strong copyleft license are conditioned on making available complete source code of licensed works and modifications, which include larger works using a licensed work, under the same license. Copyright and license notices must be preserved. Contributors provide an express grant of patent rights.
 
 
 ## Project status
