@@ -12,9 +12,9 @@ import random
 # Sec: Segmentation
 # Sec: ----------------------------------------
 
-def make_segments(df, length_in_days, time_resolution, normalization, trees):
+def make_segments(df, length_in_days, time_resolution, normalization):
 
-    if df.shape[0] < 2 or df.shape[1] < 2:
+    if df.shape[0] < 2 or df.shape[1] < 2:  # NOTE: makes sure that the dataset is not empty
         raise Exception('The data used for the experiment is not of the correct format. The data is either '
                         'empty or there is only one time series channel.')
 
@@ -32,10 +32,7 @@ def make_segments(df, length_in_days, time_resolution, normalization, trees):
             # NOTE each segment has the shape [time steps, number of features/channels].
             #  This should be considered when creating an input for a machine learning model.
 
-            metadata = np.array(list(df.iloc[idx].apply(str).to_dict().items()))
-            # note: extract a single pandas record, transform it to a dictionary and then list.
-
-            segment = segment.drop(['ts'], axis=1)  # Note: remove the time-stamp
+            segment = segment.drop(['ts'], axis=1)  # Note: removes the time-stamp
 
             if normalization:
                 segment_normalized = _rescale(segment)
@@ -46,20 +43,13 @@ def make_segments(df, length_in_days, time_resolution, normalization, trees):
                 #  saved in the TFrecords format.
 
             # Note: At this point the dataframe has been converted to a numpy array
-            yield [np.delete(segment_normalized, trees, axis=1),
-                   segment_normalized[:, trees, None],
-                   metadata
-                   ]
-            # Note: The output looks like the following:
-            #  [['LM0','LM1',...,'LMtrees-1', 'weather data', 'soil data],
-            #  [LMtres],
-            #  ]
+            yield segment_normalized
             idx += segment_length
         else:
             idx += 1
 
 
-def _add_gaps(segment, segment_length, gap_size, gap_type, channels_to_fix):
+def add_gaps(segment, segment_length, gap_size, gap_type, channels_to_fix):
     # Todo: make sure the function works from within this file.
     # NOTE: Segment is the data input. A multi-channel time series in the form of a numpy array.
     #  It has a shape of the form: (segment length, number of channels).
@@ -67,8 +57,8 @@ def _add_gaps(segment, segment_length, gap_size, gap_type, channels_to_fix):
     # TODO (gap_type): add the possibility of sampling gap sizes from a uniform and an exponential distribution
     new_segment = []
 
-    for i in range(segment.shape[1]):
-        array = segment[:, i]
+    for i in range(segment.shape[1]): # NOTE: for loop over all the channels of time series
+        array = segment[:, i] # NOTE: array represents the i'th channel of the time series
         if i in channels_to_fix:
             start_index = np.random.randint(segment_length - gap_size)
             # NOTE: selects a random point on the array to start with the gap

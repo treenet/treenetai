@@ -70,22 +70,22 @@ For the moment it is only possible to clone the repository to a PC and use the t
 ## Usage
 <!-- Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README. -->
 
-In principle, only the script files in the `scripts` folder should be modified for normal usage. Explanations and details related to the parameters used are explained within these scripts. There are two parts to the software in the repository. The first part is the creation (including training and verification) of the model and the second part is the application of the model for gap-filling.
+In principle, only the shell script files in the `scripts` folder should be modified for normal usage. Explanations and details related to the parameters used are explained within these scripts. There are two parts to the software in the repository. The first part is the creation (including training and verification) of the model and the second part is the application of the model for gap-filling.
 
 ### Part 1
 
-#### Data preparation for model input: `1_make_TFrecords.sh`
+#### Data preparation for model input: [`1_make_TFrecords.sh`](scripts/1_make_TFrecords.sh)
 The first step of the tool work-flow is to convert the format of the time series data so that it is compatible with the input requirements of the machine learning model and store it in the tensorflow TFrecords format.  There is a script that (`load_and_convert_raw_data.py`) that downloads the raw data and corresponding metadata directly from a PostgreSQL database. The raw data is processed so that it can be used as input for the machine learning models. In particular, there is a script (`tfrecord_make.py`) that combines the downloaded data and metadata into the tfrecords format, so that the neural network training input and corresponding labels are always together in the tfrecords data structure. 
 
-#### Model training: `2_train_model.sh`
+#### Model training: [`2_train_model.sh](scripts/2_train_model.sh)`
 The second part of the project is the training phase. The main script for this phase is the `training.py` file. It is combined with the `utils.py` script to load the tfrecords (with the help of the `tfrecords_load.py` script), to load the desired model (with the help of the `get_model.py` script) and to train the neural network. The architecture of each model is stored in a separate python script inside the "models" directory. The hyperparameters and other parameters for the training of the model are stored in the config.py file. There is a bash script that is used to call the `tfrecord_make.py` script that initiates the creation of the tfrecords. There is a second bash script that calls the `training.py` function together with the variables from the `config.py` file. 
 
-#### Model evaluation: `3_evaluate_model.sh`
+#### Model evaluation: [`3_evaluate_model.sh`](scripts/3_evaluate_model.sh)
 There is a third bash script that calls the `evaluate.py` file to evaluate the model. 
 
 ### Part 2
 
-#### Gap-filling: `4_fill_gaps.sh`
+#### Gap-filling: [`4_fill_gaps.sh`](scripts/4_fill_gaps.sh)
 
 ## Support
 Contact [Mirko Lukovic](https://lukov.github.io) for help.
@@ -107,10 +107,11 @@ The lead authors of this project are Mirko Lukovic and Roman Zwifel. The idea be
 The initial development and deployment of the code was made possible by the **Open Research Data Program of the ETH Board** ([link](https://open-research-data-portal.ch/projects/ai-module-for-gap-filling-treenet-time-series/)). The host institution of the developers was the Siwss Federal Institute for Forest, Snow and Landscape Research, [WSL](https://www.wsl.ch/en/).
 
 ## Citation
-If you use this software in your work, please cite it and if pertinent the accompanying scientific article. 
+If you use this software in your work, please cite it and the accompanying scientific article. 
 
 **Software**: You can find the citation details in the top right corner of this repository, under the "**About**" section ("Cite this repository").\
-**Article**: Mirko Luković, Roman Zweifel *et al.* (2022), [Reconstructing radial stem size changes of trees with machine learning](http://doi.org/10.1098/rsif.2022.0349), J. R. Soc. Interface, 1920220349. Citation: [BibTex](files/article_citation.bib) or [ris](files/article_citation.ris) or [endnote](files/article_citation.enw).
+**Article**: Mirko Luković, Roman Zweifel *et al.* (2022), Reconstructing radial stem size changes of trees with machine learning, J. R. Soc. Interface, 1920220349. Citation: [BibTex](files/article_citation.bib) or [ris](files/article_citation.ris) or [endnote](files/article_citation.enw).\
+[Link to article](http://doi.org/10.1098/rsif.2022.0349).
 
 
 

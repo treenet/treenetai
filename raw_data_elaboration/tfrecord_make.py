@@ -76,7 +76,39 @@ class DatasetConfiguration(object):
         # metadata = dpl.clean_metadata(meta)
         metadata = meta
 
-        if self.experiment_type == 'nearest-neighbours':
+        if self.experiment_type == 'gap-filling':
+            # TODO: the following line removes rare species.
+            #  This should be automated and given as an option when running the code. A flag should be added.
+            index_names = metadata.loc[
+                metadata['species'].isin(['Sorbus aria', 'Larix decidua', 'Quercus robur'])].series_name.to_list()
+
+            metadata = metadata[metadata.series_name.isin(index_names) == False].reset_index(drop=True)
+
+            segments = []
+            print('constructing segments of desired length with gaps...')
+            # TODO: test this part of the function and confirm that it works.
+            for value in df:
+                temp = dpl.make_segments(value, self.segment_length, self.time_resolution,
+                                         self.normalization, self.trees)
+                for el in temp:
+                    # Note: At this point the dataframe has been converted to a numpy array
+                    segments.extend(
+                        [dpl.add_gaps(el, self.segment_length, self.gap_size, self.gap_type, self.channels_to_fix),
+                        temp,
+                        metadata
+                        ]
+                    )
+                    # Note: The output looks like the following:
+                    #  [['LM with gaps', 'weather data with gaps', 'soil data with gaps'],
+                    #   ['LM', 'weather data', 'soil data'],
+                    #   [metadata]
+                    #  ]
+                    # NOTE: The format of the list is [[sample1_data_np.array, sample1_label_np.array, sample1_labels_np.array],
+                    #                                  [sample2_data_np.array, sample2_label_np.array, sample2_labels_np.array],
+                    #                                  [sample3_data_np.array, sample3_label_np.array, sample3_labels_np.array],
+                    #                                  ....]
+
+        elif self.experiment_type == 'nearest-neighbours': # TODO: complete this function or remove it
             df, metadata = dpl.nn_signal_preparation(df, metadata)  # TODO: Add the number of neighbours to the script.
 
             # Todo: the following function should be accessed from dpl and not ts.
@@ -86,6 +118,7 @@ class DatasetConfiguration(object):
 
         elif self.experiment_type == 'reconstruction':
             print('constructing dataframe with all possible signal permutations...')
+            # NOTE: it is necessary to first add time-series permutations to the original dataframe
             df_with_permutations, new_meta_data = dpl.multi_dendro_channel(df, metadata, self.tree_species, self.trees,
                                                                            self.combination_samples,
                                                                            self.combination_samples_rand)
@@ -93,16 +126,26 @@ class DatasetConfiguration(object):
 
             segments = []
             print('constructing segments of desired length from the permutation dataframe...')
+            # TODO: test this part of the function and confirm that it works.
             for value in df_with_permutations:
-                segments.extend(dpl.make_segments(value, self.segment_length, self.time_resolution,
-                                                  self.normalization, self.trees))
+                temp = dpl.make_segments(value, self.segment_length, self.time_resolution,
+                                                  self.normalization, self.trees)
+                
+                # Note: At this point the dataframe has been converted to a numpy array
+                segments.extend([np.delete(temp, self.trees, axis=1),
+                    temp[:, self.trees, None],
+                    # metadata #TODO: add metadata also
+                    ]
+                )
+                # Note: The output looks like the following:
+                #  [['LM_0','LM_1',...,'LM_{trees-1}', 'weather data', 'soil data'],
+                #   ['LM_trees'],
+                #   ['metadata']
+                #  ]
         else:
             raise Exception(f'The experiment type ' + self.experiment_type + ' is unknown.')
 
-        # NOTE: The format of the list is [[sample1_data_np.array, sample1_label_np.array, sample1_metadata_np.array],
-        #                                  [sample2_data_np.array, sample2_label_np.array, sample2_labels_np.array],
-        #                                  [sample3_data_np.array, sample3_label_np.array, sample3_labels_np.array],
-        #                                  ....]
+        
         # NOTE: Write the processed data to a pickle file
         print('writing pkl file...')
         with open(self.tfrecords_path+'/data_' + str(FLAGS.file_id) + '.pkl', 'wb') as f:
@@ -218,51 +261,52 @@ def main(_argv):
 
 
 if __name__ == "__main__":
+
     from absl import app, flags
     from absl.flags import FLAGS
 
-    flags.DEFINE_string('data_file_path', '../data',
-                        'path to directory, images and labels')
-    flags.DEFINE_string('metadata_file_path', '../metadata',
-                        'metadata path')
-    flags.DEFINE_string('tfrecords_dir_path', '../tfrecords',
-                        'tfrecords directory')
-    flags.DEFINE_integer('segment_length', 30,
-                         'length of the segments into which the time series should be divided')
-    flags.DEFINE_integer('time_resolution', 1,
-                         'time resolution of the time series')
-    flags.DEFINE_list('data_channels', None,
-                      'select the measured features to be used')
-    flags.DEFINE_integer('file_id', np.random.randint(1000),
-                         'identifier for each tfrecords file. details about the file contents can be found'
-                         'in the info file with the same ID number.')
-    flags.DEFINE_float('data_split', 0.2,
-                       'percentage of test data vs train data. The number should be between 0 and 1.')
-    flags.DEFINE_integer('random_state', 48,
-                         'random state for train-test shuffle')
-    flags.DEFINE_integer('gap_size', 10,
-                         'average gap size in days')
-    flags.DEFINE_string('gap_type', 'constant',
-                        'gap size distribution')
-    flags.DEFINE_string('experiment_type', 'gap-filling',
-                        'type of experiment to be performed. the label also depends on it.'
-                        'choices: gap-filling, time-series-enhancement, nearest-neighbours')
-    flags.DEFINE_bool('normalization', False,
-                      'should the input time series segments be normalized or not?')
-    flags.DEFINE_multi_integer('channels_to_fix', 0,
-                               'channels that are considered for gap filling. '
-                               'make sure that the indices correspond to the correct channel.'
-                               '0 should always represent the dendrometer signal.')
-    flags.DEFINE_string('file_type', 'pkl',
-                        'Type of file where data is stored.'
-                        'choices: rda, csv, npy, pkl')
-    flags.DEFINE_integer('tree_number', 3,
-                         'number of different tree dendrometer signals to use as input')
-    flags.DEFINE_list('species', 'all', 'species considered')
-    flags.DEFINE_integer('combination_samples', '3', 'number input signal combinations (sets) to be selected')
-    flags.DEFINE_bool('combination_samples_rand', False,
-                      'should the selection be random?')
-    flags.DEFINE_string('notes', None,
-                        'additional notes for clarification')
+    flags.DEFINE_string         ('data_file_path', '../data',
+                                'path to directory, images and labels')
+    flags.DEFINE_string         ('metadata_file_path', '../metadata',
+                                'metadata path')
+    flags.DEFINE_string         ('tfrecords_dir_path', '../tfrecords',
+                                'tfrecords directory')
+    flags.DEFINE_integer        ('segment_length', 30,
+                                'length of the segments into which the time series should be divided')
+    flags.DEFINE_integer        ('time_resolution', 1,
+                                'time resolution of the time series')
+    flags.DEFINE_list           ('data_channels', None,
+                                'select the measured features to be used')
+    flags.DEFINE_integer        ('file_id', np.random.randint(1000),
+                                'identifier for each tfrecords file. details about the file contents can be found'
+                                'in the info file with the same ID number.')
+    flags.DEFINE_float          ('data_split', 0.2,
+                                'percentage of test data vs train data. The number should be between 0 and 1.')
+    flags.DEFINE_integer        ('random_state', 48,
+                                'random state for train-test shuffle')
+    flags.DEFINE_integer        ('gap_size', 10,
+                                'average gap size in days')
+    flags.DEFINE_string         ('gap_type', 'constant',
+                                'gap size distribution')
+    flags.DEFINE_string         ('experiment_type', 'gap-filling',
+                                'type of experiment to be performed. the label also depends on it.'
+                                'choices: gap-filling, time-series-enhancement, nearest-neighbours')
+    flags.DEFINE_bool           ('normalization', False,
+                                'should the input time series segments be normalized or not?')
+    flags.DEFINE_multi_integer  ('channels_to_fix', 0,
+                                'channels that are considered for gap filling. '
+                                'make sure that the indices correspond to the correct channel.'
+                                '0 should always represent the dendrometer signal.')
+    flags.DEFINE_string         ('file_type', 'pkl',
+                                'Type of file where data is stored.'
+                                'choices: rda, csv, npy, pkl')
+    flags.DEFINE_integer        ('tree_number', 3,
+                                'number of different tree dendrometer signals to use as input')
+    flags.DEFINE_list           ('species', 'all', 'species considered')
+    flags.DEFINE_integer        ('combination_samples', '3', 'number input signal combinations (sets) to be selected')
+    flags.DEFINE_bool           ('combination_samples_rand', False,
+                                'should the selection be random?')
+    flags.DEFINE_string         ('notes', None,
+                                'additional notes for clarification')
 
     app.run(main)

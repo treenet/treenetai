@@ -4,7 +4,7 @@
 #-----------------------------------------------------------------------------------------------------------------------------#
 # file_id:              unique identifier for the file containing the tfrecord data
 #-----------------------------------------------------------------------------------------------------------------------------#
-# file_type:            file format of the input files containing the data and metadata
+# file_type:            file format of the input files containing the data and metadata; .rda and .pkl for now.
 #-----------------------------------------------------------------------------------------------------------------------------#
 # data_file_path:       path to file with the input data
 #-----------------------------------------------------------------------------------------------------------------------------#
@@ -14,9 +14,9 @@
 #-----------------------------------------------------------------------------------------------------------------------------#
 # species:              tree species to consider. options are a single sepcies or "all" for all available tree species
 #-----------------------------------------------------------------------------------------------------------------------------#
-# segment_length:       enter the number of days
+# segment_length:       enter the number of days for the segment lengths
 #-----------------------------------------------------------------------------------------------------------------------------#
-# time_resolution:      depends on the resolution of the input data. Enter the factor to multiply the entire segment length.
+# time_resolution:      this is the time resolution of the input data. Enter the factor to multiply the entire segment length.
 #                       e.g. The time resolution of the raw treenet data is 10min, therefore it would require 6 cells in the 
 #                       vector to accomodate 1 hour. If the resolution of the raw data is 1hr, then one cell is enough.
 #-----------------------------------------------------------------------------------------------------------------------------#
@@ -37,7 +37,15 @@
 #                       gaussian: random gap sizes used with average gap_size and variance ??? (TODO)
 #-----------------------------------------------------------------------------------------------------------------------------#
 # channels_to_fix:      this is necessary only if 'gap-filling' is used as the experiment type.
-#                       these are the channels of the time series that have to be trained for gap-filling
+#                       these are the channels of the time series that have to be trained for gap-filling.
+#                       each channel is represented by a number:
+#                       0 - dendrometer
+#                       1 - temperature
+#                       2 - relative humidity 
+#                       3 - vapour pressure deficit 
+#                       4 - solar radiation
+#                       5 - soil water potential
+#                       6 - total precipitation
 #-----------------------------------------------------------------------------------------------------------------------------#
 # normalization:        true or false for normalization of the data (partial TODO)
 #-----------------------------------------------------------------------------------------------------------------------------#
@@ -67,7 +75,7 @@ python raw_data_elaboration/tfrecord_make.py \
         --species 'abies' \
         --segment_length 30 \
         --time_resolution 6 \
-        --data_channels 'series_id','ts','value' \
+        --data_channels '[0,1,2]' \
         --experiment_type 'gap-filling' \
         --data_split 0.2 \
         --random_state 1 \

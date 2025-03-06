@@ -38,3 +38,5 @@ if __name__ == "__main__":
 
     if args.source == "remote":
         server_data(args.meta_path, args.meta_path, args.credentials_path)
+
+    # TODO: create a function that puts all the channels together into a single multi-channel time series.
