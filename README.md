@@ -19,7 +19,7 @@ TreeNet aims to link research results from carbon flux sites with dendrometer da
 The project was initiated by Roman Zweifel, WSL and Werner Eugster, ETHZ in 2009 and is supported by an increasing number of [partners](https://treenet.info/switzerland/).
 
 <p align="center">
-	<img src="images/dendrometers.jpg" width=auto, height=250>
+	<img src="images/dendrometers.jpg" width=auto, height=200>
 </p>
 
 
