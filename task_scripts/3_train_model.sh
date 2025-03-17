@@ -5,7 +5,7 @@ export DATA=/storage/lukovic/Data/FORWARDS/treenet/processed_data/tfrecords/
 
 EXP_DESC="test_GPU_node04"
 
-python training.py \
+python ~/codes/training.py \
   --timeseries_label \
   --proj_name 'TNT' \
   --experiment_type 'reconstruction' \

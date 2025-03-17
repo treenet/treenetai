@@ -59,22 +59,12 @@ class DatasetConfiguration(object):
         print('experiment type: ', self.experiment_type)
         print('file type: ', self.file_type)
 
-    def make_dataframe(self, data_path, metadata_path):
-        if self.file_type == 'rda':
-            df = dpl.convert_r2pandas(data_path, "dfAll")
-            meta = dpl.convert_r2pandas(metadata_path, "metadata")
-        elif self.file_type == 'pkl':
-            df = pd.read_pickle(data_path)
-            meta = pd.read_pickle(metadata_path)
-        else:
-            raise Exception('Input data file format not recognised. Use .rda or .pkl formats.')
-
-        return df, meta
-
     def segmentation(self):
-        df, meta = self.make_dataframe(self.data_path, self.metadata_path)
+        metadata = dpl.load_dataframe(self.metadata_path, self.file_type, "metadata")
+        df = dpl.load_dataframe(self.data_path, self.file_type, "dfAll")
+
         # metadata = dpl.clean_metadata(meta)
-        metadata = meta
+        # metadata = meta
 
         if self.experiment_type == 'gap-filling':
             # TODO: the following line removes rare species.
@@ -255,7 +245,7 @@ def main(_argv):
                                        combination_samples=FLAGS.combination_samples,
                                        combination_samples_rand=FLAGS.combination_samples_rand,
                                        tree_species=FLAGS.species,
-                                       )
+                                      )
 
     data_config.write_tfrecords()
 
@@ -266,47 +256,47 @@ if __name__ == "__main__":
     from absl.flags import FLAGS
 
     flags.DEFINE_string         ('data_file_path', '../data',
-                                'path to directory, images and labels')
+                                 'path to directory, images and labels')
     flags.DEFINE_string         ('metadata_file_path', '../metadata',
-                                'metadata path')
+                                 'metadata path')
     flags.DEFINE_string         ('tfrecords_dir_path', '../tfrecords',
-                                'tfrecords directory')
+                                 'tfrecords directory')
     flags.DEFINE_integer        ('segment_length', 30,
-                                'length of the segments into which the time series should be divided')
+                                 'length of the segments into which the time series should be divided')
     flags.DEFINE_integer        ('time_resolution', 1,
-                                'time resolution of the time series')
+                                 'time resolution of the time series')
     flags.DEFINE_list           ('data_channels', None,
-                                'select the measured features to be used')
+                                 'select the measured features to be used')
     flags.DEFINE_integer        ('file_id', np.random.randint(1000),
-                                'identifier for each tfrecords file. details about the file contents can be found'
-                                'in the info file with the same ID number.')
+                                 'identifier for each tfrecords file. details about the file contents can be found'
+                                 'in the info file with the same ID number.')
     flags.DEFINE_float          ('data_split', 0.2,
-                                'percentage of test data vs train data. The number should be between 0 and 1.')
+                                 'percentage of test data vs train data. The number should be between 0 and 1.')
     flags.DEFINE_integer        ('random_state', 48,
-                                'random state for train-test shuffle')
+                                 'random state for train-test shuffle')
     flags.DEFINE_integer        ('gap_size', 10,
-                                'average gap size in days')
+                                 'average gap size in days')
     flags.DEFINE_string         ('gap_type', 'constant',
-                                'gap size distribution')
+                                 'gap size distribution')
     flags.DEFINE_string         ('experiment_type', 'gap-filling',
-                                'type of experiment to be performed. the label also depends on it.'
-                                'choices: gap-filling, time-series-enhancement, nearest-neighbours')
+                                 'type of experiment to be performed. the label also depends on it.'
+                                 'choices: gap-filling, time-series-enhancement, nearest-neighbours')
     flags.DEFINE_bool           ('normalization', False,
-                                'should the input time series segments be normalized or not?')
+                                 'should the input time series segments be normalized or not?')
     flags.DEFINE_multi_integer  ('channels_to_fix', 0,
-                                'channels that are considered for gap filling. '
-                                'make sure that the indices correspond to the correct channel.'
-                                '0 should always represent the dendrometer signal.')
+                                 'channels that are considered for gap filling. '
+                                 'make sure that the indices correspond to the correct channel.'
+                                 '0 should always represent the dendrometer signal.')
     flags.DEFINE_string         ('file_type', 'pkl',
-                                'Type of file where data is stored.'
-                                'choices: rda, csv, npy, pkl')
+                                 'Type of file where data is stored.'
+                                 'choices: rda, csv, npy, pkl')
     flags.DEFINE_integer        ('tree_number', 3,
-                                'number of different tree dendrometer signals to use as input')
+                                 'number of different tree dendrometer signals to use as input')
     flags.DEFINE_list           ('species', 'all', 'species considered')
     flags.DEFINE_integer        ('combination_samples', '3', 'number input signal combinations (sets) to be selected')
     flags.DEFINE_bool           ('combination_samples_rand', False,
-                                'should the selection be random?')
+                                 'should the selection be random?')
     flags.DEFINE_string         ('notes', None,
-                                'additional notes for clarification')
+                                 'additional notes for clarification')
 
     app.run(main)

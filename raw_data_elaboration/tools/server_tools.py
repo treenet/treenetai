@@ -6,11 +6,11 @@ import pandas as pd
 
 
 def _make_connection(USER, PASSWORD, HOST, PORT, DBNAME):
-    cnx = psycopg2.connect(user=USER,
-                           password=PASSWORD,
-                           host=HOST,
-                           port=PORT,
-                           database=DATABASE)
+    cnx = psycopg2.connect(user = USER,
+                           password = PASSWORD,
+                           host = HOST,
+                           port = PORT,
+                           database = DBNAME)
     cursor_cnx = cnx.cursor()
     return cnx, cursor_cnx
 
@@ -18,6 +18,37 @@ def _make_connection(USER, PASSWORD, HOST, PORT, DBNAME):
 def _close_connection(cnx, cursor_cnx):
     cursor_cnx.close()
     cnx.close()
+
+def get_database_info(database, USER, PASSWORD, HOST, PORT, DBNAME):
+    cnx = psycopg2.connect(user = USER,
+                           password = PASSWORD,
+                           host = HOST,
+                           port = PORT,
+                           database = DBNAME)
+
+    cursor_cnx = cnx.cursor()
+
+    query = "SELECT * FROM " + database
+    #query = "SELECT * FROM INFORMATION_SCHEMA.COLUMNS --WHERE TABLE_NAME = data_dendro_lm LIMIT 10"
+
+    with cursor_cnx as cursor:
+        output = []
+        cursor.execute(query)
+        colnames = [desc[0] for desc in cursor.description]
+        result = cursor.fetchall()
+        for row in result:
+            output.append(row)
+        
+    
+    with open(database+'_column_names.txt', 'w+') as f:
+        # write elements of list
+        for item in colnames:
+            f.write('%s\n' %item)
+
+    f.close()
+
+    _close_connection(cnx, cursor_cnx)
+    
 
 
 def get_metadata(USER, PASSWORD, HOST, PORT, DBNAME):
@@ -141,10 +172,8 @@ def get_metadata(USER, PASSWORD, HOST, PORT, DBNAME):
     return pd.DataFrame(data=result, columns=keys)
 
 
-def get_data(series_id):
-    cnx, cursor_cnx = _make_connection()
-    query = "SELECT series_id,ts,value FROM data_dendro_lm WHERE series_id=%s ORDER BY ts"
-    value = (series_id,)
+def get_data_element(value, query, USER, PASSWORD, HOST, PORT, DBNAME):
+    cnx, cursor_cnx = _make_connection(USER, PASSWORD, HOST, PORT, DBNAME)
 
     with cursor_cnx as cursor:
         cursor.execute(query, value)

@@ -122,6 +122,9 @@ def _normalize(array):
     array = (array - array.min()) / (array.max() - array.min())
     return array
 
+# Sec: END ------------------------------------
+
+
 
 # Sec: ----------------------------------------
 # Sec: Multichannel dendrometer data processing
@@ -321,6 +324,10 @@ def _combine_dataframes(df):
     return pd.concat(df, ignore_index=True, sort=False)
 
 
+# Sec: END ------------------------------------
+
+
+
 # sec ##################################################################################################
 # sec. This subsection is old and obsolete. Its codes should be merged with the others and then deleted.
 # TODO: the function below should be divided into smaller parts. Most of the parts already exist as functions listed
@@ -516,7 +523,8 @@ def permutations(original_list, elements, min_el):
         permutation_list.append(head + temp_middle[:min_el] + tail)
 
     return permutation_list
-# sec ##################################################################################################
+
+# sec END ##############################################################################################
 
 
 # Sec: ----------------------------------------
@@ -526,10 +534,14 @@ def permutations(original_list, elements, min_el):
 def clean_metadata(file):
     return 1
 
-
-def convert_r2pandas(rda_file_path, field="df"):
-    return pyreadr.read_r(rda_file_path)[field]
-
+def load_dataframe(data_path, file_type='pkl', database=None):
+    if file_type == 'rda':  # TODO: make sure that the rda file is loaded as a pandas dataframe. The resto of the codes depends on it.
+        df = pyreadr.read_r(data_path)[database]
+    elif file_type == 'pkl':
+        df = pd.read_pickle(data_path)
+    else:
+        raise Exception('Input data file format not recognised. Use .rda or .pkl formats.')
+    return df
 
 def get_folders_to_process(dir_paths):
     folders = []
@@ -573,6 +585,10 @@ def load_list(input_path):
         for line in file.readlines():
             lines.append(line.rstrip("\n"))
     return lines
+
+
+# Sec: END ------------------------------------
+
 
 # Sec: ----------------------------------------
 # Sec: TFrecords
@@ -675,3 +691,5 @@ def _int64_feature(value):
 
     return tf.train.Feature(int64_list=tf.train.Int64List(value=[value]))
 
+
+# Sec: END ------------------------------------

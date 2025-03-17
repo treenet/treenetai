@@ -55,7 +55,7 @@
 
 dataPath=/storage/lukovic/Data/FORWARDS/treenet/raw_data/data_Server.pkl
 metadataPath=/storage/lukovic/Data/FORWARDS/treenet/raw_data/metadata_server.pkl
-tfrecordsDirPath=/home/lukovic/data/treenet/tfrecords
+tfrecordsDirPath=~/data/treenet/tfrecords
 
 # TODO: START
 #  1) channels_to_fix option has to be changed so that it requires a description such as dendrometer,
@@ -66,7 +66,7 @@ tfrecordsDirPath=/home/lukovic/data/treenet/tfrecords
 #  3) The parameters should be stored in a file and loaded directly from it.
 # TODO: END
 
-python raw_data_elaboration/tfrecord_make.py \
+python ~/codes/treenetai/raw_data_elaboration/tfrecord_make.py \
         --file_id 1 \
         --file_type 'pkl' \
         --data_file_path $dataPath \
