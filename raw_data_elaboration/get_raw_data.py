@@ -43,7 +43,7 @@ def server_data_dendrometer(database, data_path, credentials_path):
     with open(credentials_path, 'r') as f:
         credentials = yaml.full_load(f)
 
-    data = []
+    data = {}
     meta = server.get_metadata( credentials.get('user'), 
                                 credentials.get('password'), 
                                 credentials.get('host'), 
@@ -60,20 +60,21 @@ def server_data_dendrometer(database, data_path, credentials_path):
     query = "SELECT series_id,ts,value FROM " + database + " WHERE series_id=%s ORDER BY ts" 
     
     for row in meta.iterrows():
-        if row[1].tree_species == '-999':
-            print('series id: ' + str(row[1].series_id) + ' -> empty')
+        #if row[1].tree_species == '-999':
+        #    print('series id: ' + str(row[1].series_id) + ' -> empty')
         # else:
+        print('series id: ' + str(row[1].series_id))
         series_id = row[1].series_id
         value = (series_id,)
 
-        data.append(server.get_data_element(value, 
+        data[series_id] = server.get_data_element(value, 
                                             query,
                                             credentials.get('user'), 
                                             credentials.get('password'), 
                                             credentials.get('host'), 
                                             credentials.get('port'), 
                                             credentials.get('dbname')
-                                            ))
+                                            )
         write_text(data_path+"/screen.log", 'series id: ' + str(series_id) + ' -> OK')
 
     with open(data_path+"/"+database+".pkl", 'wb') as f:
@@ -89,7 +90,7 @@ def server_data_climate(database, data_path, credentials_path):
     with open(credentials_path, 'r') as f:
         credentials = yaml.full_load(f)
 
-    data = []
+    data = {}
     meta = server.get_metadata( credentials.get('user'), 
                                 credentials.get('password'), 
                                 credentials.get('host'), 
@@ -106,23 +107,19 @@ def server_data_climate(database, data_path, credentials_path):
     query = "SELECT site_id,ts,temp,rh,swp,total_precip,rad,vpd, vpd_bo FROM " + database + " WHERE site_id=%s ORDER BY ts" 
     
     for row in meta.iterrows():
-        if row[1].tree_species == '-999':
-            print('series id: ' + str(row[1].series_id) + ' -> empty')
-        # else:
-
-        series_id = row[1].series_id
+        print('series id: ' + str(row[1].site_id))
         site_id = row[1].site_id
         value = (site_id,)
 
-        data.append(server.get_data_element(value, 
-                                            query,
-                                            credentials.get('user'), 
-                                            credentials.get('password'), 
-                                            credentials.get('host'), 
-                                            credentials.get('port'), 
-                                            credentials.get('dbname')
-                                            ))
-        write_text(data_path+"/screen.log", 'series id: ' + str(series_id) + ' -> OK')
+        data[site_id] = server.get_data_element(value, 
+                                                query,
+                                                credentials.get('user'), 
+                                                credentials.get('password'), 
+                                                credentials.get('host'), 
+                                                credentials.get('port'), 
+                                                credentials.get('dbname')
+                                                )
+        write_text(data_path+"/screen.log", 'series id: ' + str(site_id) + ' -> OK')
 
     with open(data_path+"/"+database+".pkl", 'wb') as f:
         pickle.dump(data, f)
@@ -139,7 +136,7 @@ if __name__ == "__main__":
 
     if args.database == "metadata":
         server_metadata(args.path, args.credentials_path)
-    elif args.database == "denrometer":
+    elif args.database == "dendrometer":
         server_data_dendrometer("data_dendro_lm", args.path, args.credentials_path)
     elif args.database == "climate":
         server_data_climate("data_meteo_l2", args.path, args.credentials_path)

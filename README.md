@@ -48,15 +48,17 @@ TreeNetAI/
 			|-- server_tools.py
 		|-- data_processing_library.py
 		|-- feature_descriptions.py
-		|-- load_and_convert_raw_data.py
+		|-- get_raw_data.py
 		|-- tfrecords_make.py
 		|-- tfrecords_load.py
+		|-- transform_raw_data.py
 	|-- scripts/
 		|-- 0_get_data.sh
-		|-- 1_make_tfrecords.sh
-		|-- 2_train_model.sh
-		|-- 3_evaluate_model.sh
-		|-- 4_fill_gaps.sh
+		|-- 1_convert_raw_data.sh
+		|-- 2_make_tfrecords.sh
+		|-- 3_train_model.sh
+		|-- 4_evaluate_model.sh
+		|-- 5_fill_gaps.sh
 	|-- utils/
 		|-- evaluation_tools.py
 		|-- get_model.py
@@ -139,7 +141,7 @@ If you use this software in your work, please cite it and the accompanying scien
 
 ```
 @article{doi:10.1098/rsif.2022.0349,
-    author = {Luković, Mirko  and Zweifel, Roman  and Thiry, Guillaume  and Zhang, Ce  and Schubert, Mark },
+    author = {Luković, Mirko and Zweifel, Roman  and Thiry, Guillaume  and Zhang, Ce  and Schubert, Mark },
     title = {Reconstructing radial stem size changes of trees with machine learning},
     journal = {Journal of The Royal Society Interface},
     volume = {19},
