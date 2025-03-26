@@ -1,5 +1,6 @@
 import pandas as pd
 import argparse
+import pickle
 
 import data_processing_library as dpl
 
@@ -16,22 +17,24 @@ if __name__ == "__main__":
     dendro = dpl.load_dataframe(args.dendro_path)
     clima = dpl.load_dataframe(args.clima_path)
 
-    data = []
-    for el in dendro:
-        if len(el) > 0:
-            data.append(el)
-    
+    meta_id = {}
+    for index, row in meta.iterrows():    
+        print(row.series_id, row.site_id)
+        meta_id[row.series_id] = row
 
-    df = {}
+    df = {} # Initialize dictionary
     
-    for i in range(len(data)):
-        if data[i].series_id == clima[i].series_id:
-            a = pd.merge(dendro[i], clima[i], on = "ts", how = "outer")
+    for key, value in dendro.items():
+        if len(value) > 0:
+            a = pd.merge(value, clima[meta_id[key].site_id], on = "ts", how = "outer")
             b = a [a.value.first_valid_index():a.value.last_valid_index()]
-            c = b[["series_id", "ts", "value", "temp", "rh", "swp", "total_precip", "rad", "vpd"]].rename(columns={"value": "stem_radius"})
+            c = b[["series_id", "site_id", "ts", "value", "temp", "rh", "swp", "total_precip", "rad", "vpd"]].rename(columns={"value": "stem_radius"})
             start = c.ts.iloc[0]
             end = c.ts.iloc[-1]
-            complete_times = {'ts': pd.date_range(start=start, end=end, freq='10Min')}
+            complete_times = {'ts': pd.date_range(start=start, end=end, freq='10Min')} 
 
             d = pd.merge(c, pd.DataFrame(complete_times), on = "ts", how = "outer")
-            df[int(d.iloc[0].series_id)] = d
+            df[key] = d
+    
+    with open(args.output_folder+"/combined_dendro_climate.pkl", 'wb') as f:
+        pickle.dump(df, f)
