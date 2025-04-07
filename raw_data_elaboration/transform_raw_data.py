@@ -18,22 +18,26 @@ if __name__ == "__main__":
     clima = dpl.load_dataframe(args.clima_path)
 
     meta_id = {}
+    # NOTE: iterate over the metadata table and convert it to a dictionary in which the series_id is the key.
     for index, row in meta.iterrows():    
-        print(row.series_id, row.site_id)
         meta_id[row.series_id] = row
 
     df = {} # Initialize dictionary
     
-    for key, value in dendro.items():
-        if len(value) > 0:
-            a = pd.merge(value, clima[meta_id[key].site_id], on = "ts", how = "outer")
-            b = a [a.value.first_valid_index():a.value.last_valid_index()]
-            c = b[["series_id", "site_id", "ts", "value", "temp", "rh", "swp", "total_precip", "rad", "vpd"]].rename(columns={"value": "stem_radius"})
+    for key, data in dendro.items():
+        print(key)
+        climate_data = clima[meta_id[key].site_id]
+        if len(data) > 0 and len(climate_data) > 0:
+            a = pd.merge(data, climate_data, on = "ts", how = "outer")  # NOTE: merge the dendrometer data with the climate data
+            b = a [a.value.first_valid_index():a.value.last_valid_index()]  # NOTE: remove the head and tail where "value" (in this case, the dendrometer value) is not defined
+            c = b[["series_id", "site_id", "ts", "value", "temp", "rh", "swp", "total_precip", "rad", "vpd"]].rename(columns={"value": "stem_radius"})  # NOTE: select the features to use
+            c['site_id'] = c['site_id'].ffill().bfill().astype(int)  # NOTE: the merging process changes the site and seris ids to double because of the presence of NaNs. This command fills the rows and casts the value to int.
+            c['series_id'] = c['series_id'].ffill().bfill().astype(int)
+            
             start = c.ts.iloc[0]
             end = c.ts.iloc[-1]
             complete_times = {'ts': pd.date_range(start=start, end=end, freq='10Min')} 
-
-            d = pd.merge(c, pd.DataFrame(complete_times), on = "ts", how = "outer")
+            d = pd.merge(c, pd.DataFrame(complete_times), on = "ts", how = "outer")  # NOTE: make sure that all the time stamps are present
             df[key] = d
     
     with open(args.output_folder+"/combined_dendro_climate.pkl", 'wb') as f:
