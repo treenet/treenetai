@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# NOTE: O P T I O N S   &   I N S T R U C T I O N S
+# NOTE:                 O P T I O N S   &   I N S T R U C T I O N S
 #-----------------------------------------------------------------------------------------------------------------------------#
 # file_id:              unique identifier for the file containing the tfrecord data
 #-----------------------------------------------------------------------------------------------------------------------------#
@@ -21,10 +21,12 @@
 #                       vector to accomodate 1 hour. If the resolution of the raw data is 1hr, then one cell is enough.
 #-----------------------------------------------------------------------------------------------------------------------------#
 # data_channels:        the features measured over time to be considered (stem radius, temperature, etc...)
-#                       IMPORTANT!!! The features should be listed in such a way that the first channel(s) is the dendrometer
-#                       signal and only then the weather and soil signals. TODO: This should be imporved and made fail-safe.
+#                       There are more features than might be required. Fore example the series and site identifications are
+#                       not necessary for training the model and should therefore not be included. For options, see the section
+#                       channels_to_fix below. IMPORTANT: always include the time stamp. It is necessary for other functions. 
+#                       The time stamp will be automatically removed when the segments are created (make_segments() function).                       
 #-----------------------------------------------------------------------------------------------------------------------------#
-# experiment_type:      gap-filling
+# experiment_type:      gap-filling (others in preparation)
 #-----------------------------------------------------------------------------------------------------------------------------#
 # data_split:           train:validation spllit of the data. the value indicated is the proportion used for validation
 #-----------------------------------------------------------------------------------------------------------------------------#
@@ -38,14 +40,15 @@
 #-----------------------------------------------------------------------------------------------------------------------------#
 # channels_to_fix:      this is necessary only if 'gap-filling' is used as the experiment type.
 #                       these are the channels of the time series that have to be trained for gap-filling.
-#                       each channel is represented by a number:
-#                       0 - dendrometer
-#                       1 - temperature
-#                       2 - relative humidity 
-#                       3 - vapour pressure deficit 
-#                       4 - solar radiation
-#                       5 - soil water potential
-#                       6 - total precipitation
+#                       each channel is represented by the following strings:
+
+#                       'stem_radius'   - dendrometer
+#                       'temp'          - temperature
+#                       'rh'            - relative humidity 
+#                       'vpd'           - vapour pressure deficit 
+#                       'rad'           - solar radiation
+#                       'swp'           - soil water potential
+#                       'total_precip'  - total precipitation
 #-----------------------------------------------------------------------------------------------------------------------------#
 # normalization:        true or false for normalization of the data (partial TODO)
 #-----------------------------------------------------------------------------------------------------------------------------#
@@ -53,9 +56,12 @@
 #-----------------------------------------------------------------------------------------------------------------------------#
 # NOTE: END
 
-dataPath=/storage/lukovic/Data/FORWARDS/treenet/raw_data/data_Server.pkl
-metadataPath=/storage/lukovic/Data/FORWARDS/treenet/raw_data/metadata_server.pkl
+
+# E N T E R the correct paths below
+dataPath=/storage/lukovic/Data/FORWARDS/treenet/server_data/combined_dendro_climate_dictionary.pkl
+metadataPath=/storage/lukovic/Data/FORWARDS/treenet/server_data/metadata.pkl
 tfrecordsDirPath=~/data/treenet/tfrecords
+#########################################
 
 # TODO: START
 #  1) channels_to_fix option has to be changed so that it requires a description such as dendrometer,
@@ -72,15 +78,32 @@ python ~/codes/treenetai/raw_data_elaboration/tfrecord_make.py \
         --data_file_path $dataPath \
         --metadata_file_path $metadataPath \
         --tfrecords_dir_path $tfrecordsDirPath\
-        --species 'abies' \
+        --species 'all' \
         --segment_length 30 \
         --time_resolution 6 \
-        --data_channels '[0,1,2]' \
+        --data_channels '['ts','stem_radius','temp','rh','vpd','rad','swp','total_precip']' \
         --experiment_type 'gap-filling' \
         --data_split 0.2 \
         --random_state 1 \
         --gap_size 10 \
         --gap_type 'constant' \
-        --channels_to_fix 0 \
+        --channels_to_fix '['stem_radius']' \
+        --species_to_ignore '['aria', 'robur']' \
         --normalization \
-        --notes 'Reduced data. The input data contains no metadata.' \
+        --notes 'climate data processing' \
+
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+# DATA STRUCTURE of the output
+# NOTE: The output looks like the following:
+#
+#  [['LM with gaps', 'weather data with gaps', 'soil data with gaps', 'extra features with gaps'],
+#   ['LM', 'weather data', 'soil data', 'extra features'],
+#   [metadata],
+#   [rescaling constants for each channel] 
+#  ]
+#
+# NOTE: The format of the list is [[sample1_data_np.array, sample1_label_np.array, sample1_metadata_pd.df.record, sample1_scale_constants_np.array],
+#                                  [sample2_data_np.array, sample2_label_np.array, sample2_metadata_pd.df.record, sample1_scale_constants_np.array],
+#                                  [sample3_data_np.array, sample3_label_np.array, sample3_metadata_pd.df.record, sample1_scale_constants_np.array],
+#               

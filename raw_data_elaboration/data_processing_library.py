@@ -12,7 +12,14 @@ import random
 # Sec: Segmentation
 # Sec: ----------------------------------------
 
-def make_segments(df, length_in_days, time_resolution, normalization):
+def make_segments(df, length_in_days, time_resolution, normalization=True):
+    # Input: data frame
+    # Output: if normalization is True, then numpy array; if normalization is False, then pandas datafarame
+    
+    # Creates segments of fixed length
+    # Removes time stamp from data frame
+    # Normalizes if True
+    # Converts data frame to numpy array through the _rescale function, i.e. only if normalization is True
 
     if df.shape[0] < 2 or df.shape[1] < 2:  # NOTE: makes sure that the dataset is not empty
         raise Exception('The data used for the experiment is not of the correct format. The data is either '
@@ -35,55 +42,115 @@ def make_segments(df, length_in_days, time_resolution, normalization):
             segment = segment.drop(['ts'], axis=1)  # Note: removes the time-stamp
 
             if normalization:
-                segment_normalized = _rescale(segment)
-            else:
-                segment_normalized = segment.apply(pd.to_numeric).to_numpy()
+                segment = _rescale_all(segment)
+            #else:
+            #    segment_normalized = segment.apply(pd.to_numeric).to_numpy()
                 # note: the apply(pd.to_numeric) function makes sure that all the entries are of the same numeric type.
                 #  When using data from the server, it is of the decimal type, which creates problems when the data is
                 #  saved in the TFrecords format.
 
             # Note: At this point the dataframe has been converted to a numpy array
-            yield segment_normalized
+            yield segment
             idx += segment_length
         else:
             idx += 1
 
+def add_features(df, metadata, time = True, rest = False):
+    # Adds extra features to the data frame
 
-def add_gaps(segment, segment_length, gap_size, gap_type, channels_to_fix):
+    # TODO: this function should be merged with _add_metadata_features() below.
+    for key, data in df.items():
+        if time:
+            data['hour'] = pd.to_datetime(data['ts']).dt.hour
+            data['doy'] = data.ts.dt.dayofyear
+        if rest:
+            # note: assign the values of the metadata features to the dataframes
+            for el in list(metadata)[1:]:  # Note: excludes the first entry, the series id
+                temp = metadata[metadata.series_id == key][el].to_list()[0]
+                if not temp:
+                    temp = 0.0
+                if not isinstance(temp, float):
+                    temp = float(temp)
+                data[el] = temp
+    return df
+
+
+def add_gaps(segment, segment_length, gap_size, gap_type, channels_to_fix, normalization=True):
+    # Adds gaps to segments of a time series
+    # Normalizes the segment if True
+
     # Todo: make sure the function works from within this file.
     # NOTE: Segment is the data input. A multi-channel time series in the form of a numpy array.
     #  It has a shape of the form: (segment length, number of channels).
     #  The output is a numpy array of the same shape.
     # TODO (gap_type): add the possibility of sampling gap sizes from a uniform and an exponential distribution
     new_segment = []
+    ground_truth = []
+    conversion_factors = []
 
-    for i in range(segment.shape[1]): # NOTE: for loop over all the channels of time series
-        array = segment[:, i] # NOTE: array represents the i'th channel of the time series
-        if i in channels_to_fix:
+    for el in list(segment): # NOTE: for loop over all the channels of time series
+        array = np.asarray(segment[el]) # NOTE: convert dataframe column to a numpy array
+        if el in channels_to_fix:
+            array_ground_truth = array.copy()
             start_index = np.random.randint(segment_length - gap_size)
             # NOTE: selects a random point on the array to start with the gap
             if gap_type == 'constant':
                 end_index = start_index + gap_size
             elif gap_type == 'uniform':
-                end_index = start_index + gap_size
+                end_index = start_index + gap_size  # TODO: not complete; gap size should be random
             elif gap_type == 'exponential':
-                end_index = start_index + gap_size
+                end_index = start_index + gap_size  # TODO: not complete; gap size should be random
             else:
                 raise Exception(f'The distribution of gaps is unknown.')
 
-            array[start_index:end_index] = -1
+            array[start_index:end_index] = -1  # TODO: for now I am using -1 to repreent a missing value. There might be a better way.
 
-            # NOTE we assign -1 to the region of the array where the gap is.
-            # TODO choose a value to assign when the array is not normalized.
-            #  It cannot be -1 since the signal might be negative also.
-
+            if normalization:
+                # NOTE: It is very importatn that the segment is normalized after the gap has been created. This corresponds to the realistic situation when we 
+                # have to gap-fill a time series. In that case, there is a gap and we don't have the ground truth. However, we still have to normalize. So the only
+                # way we can do that is to ignore the missing values. Of couse, this means that the ground truth will have a different normalization result if we include
+                # also the data that should be missing. We are precisely tring to train the algorithm to infer this change in normalization. 
+                array_temp = np.concatenate((array[:start_index], array[end_index:]))
+                array_temp, base, difference = _rescale_channel(array_temp, el)
+                array[:start_index] = array_temp[:start_index]
+                array[end_index:] = array_temp[start_index:]
+                array_ground_truth = (array_ground_truth - base)/difference
+        else:
+            if normalization:
+                array, base, difference = _rescale_channel(array, el)
+                array_ground_truth = array
+        
         new_segment.append(array)
+        ground_truth.append(array_ground_truth)
+        conversion_factors.append([base, difference])
 
-    return np.transpose(np.asarray(new_segment))
+    return np.transpose(np.asarray(new_segment)), np.transpose(np.asarray(ground_truth)), np.asarray(conversion_factors)
     # NOTE: converts the list of numpy arrays into a multi-dimensional numpy array and returns it.
 
+def _rescale_channel(segment, channel):
+    # normalizes only a single channel
+    if channel == 'hour':
+        segment = segment.div(24)
+        min_val = 0
+        difference = 24
+    elif channel == 'month':
+        segment = segment.div(12)
+        min_val = 0
+        difference = 12
+    else:
+        min_val = segment.min()
+        max_val = segment.max()
+        difference = max_val - min_val
+        if np.abs(difference) > 1e-4:
+            segment = _normalize(segment, min_val, difference)
+        else:
+                # NOTE: if the min/max difference is very small the signal is shifted, without division. this also avoids problems of division by zero
+                #       in the _normalize() function.
+                segment = segment - min_val
+        
+    return segment, min_val, difference
 
-def _rescale(segment):
+def _rescale_all(segment):
     # TODO (Important!!) Maybe it is better to normalize the entire time series and not the segments separately.
     #  If we consider channels of a segment that have a constant value in that time period but that nevertheless
     #  change over a longer time period, then giving them all a value of 0.5 does not really make sense.
@@ -102,24 +169,28 @@ def _rescale(segment):
     for e in list(segment):
         if e == 'hour':
             segment.loc[:, e] = segment.loc[:, e].div(24)
+            min_val = 0
+            difference = 24
         elif e == 'month':
             segment.loc[:, e] = segment.loc[:, e].div(12)
+            min_val = 0
+            difference = 12
         else:
             min_val = segment[e].min()
             max_val = segment[e].max()
-            if np.abs(max_val - min_val) > 1e-4:
-                segment.loc[:, e] = _normalize(segment.loc[:, e])
-            # else:
-            #    if max_val - min_val == 0:
-            #        segment.loc[:, e] = 0.0
-            #    else:
-            #        segment.loc[:, e] = 0.5
+            difference = max_val - min_val
+            if np.abs(difference) > 1e-4:
+                segment.loc[:, e] = _normalize(segment.loc[:, e], min_val, difference)
+            else:
+                    # NOTE: if the min/max difference is very small the signal is shifted, without division. this also avoids problems of division by zero
+                    #       in the _normalize() function.
+                    segment.loc[:, e] = segment.loc[:, e] - min_val
 
-    return np.asarray(segment.apply(pd.to_numeric))
+    return np.asarray(segment.apply(pd.to_numeric)), min_val, difference
 
 
-def _normalize(array):
-    array = (array - array.min()) / (array.max() - array.min())
+def _normalize(array, base, diff):
+    array = (array - base) / diff
     return array
 
 # Sec: END ------------------------------------
@@ -131,7 +202,7 @@ def _normalize(array):
 # Sec: ----------------------------------------
 
 # Note: Relevant for collecting into the same dataframe dendrometer signals from different trees.
-def multi_dendro_channel(df, meta, species, trees=3, permutation_samples=3, combination_samples_rand=True):
+def create_multi_dendro_channel(df, meta, species, trees=3, permutation_samples=3, combination_samples_rand=True):
 
     print('creating multi-channel dataframe')
     print('species used: ', species)
@@ -531,8 +602,6 @@ def permutations(original_list, elements, min_el):
 # Sec: File processing functions
 # Sec: ----------------------------------------
 
-def clean_metadata(file):
-    return 1
 
 def load_dataframe(data_path, file_type='pkl', database=None):
     if file_type == 'rda':  # TODO: make sure that the rda file is loaded as a pandas dataframe. The resto of the codes depends on it.

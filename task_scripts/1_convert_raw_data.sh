@@ -7,4 +7,4 @@ out_folder="/home/lukovic/data/treenet/server_data/"
 
 python3 ~/codes/treenetai/raw_data_elaboration/transform_raw_data.py $meta_path $dendro_path $clima_path $out_folder
 
-mv /home/lukovic/data/treenet/server_data/combined_dendro_climate.pkl /storage/lukovic/Data/FORWARDS/treenet/
+mv /home/lukovic/data/treenet/server_data/combined_dendro_climate_dictionary.pkl /storage/lukovic/Data/FORWARDS/treenet/server_data/

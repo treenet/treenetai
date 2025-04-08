@@ -63,19 +63,22 @@ def server_data_dendrometer(database, data_path, credentials_path):
         #if row[1].tree_species == '-999':
         #    print('series id: ' + str(row[1].series_id) + ' -> empty')
         # else:
-        print('series id: ' + str(row[1].series_id))
-        series_id = row[1].series_id
-        value = (series_id,)
 
-        data[series_id] = server.get_data_element(value, 
-                                            query,
-                                            credentials.get('user'), 
-                                            credentials.get('password'), 
-                                            credentials.get('host'), 
-                                            credentials.get('port'), 
-                                            credentials.get('dbname')
-                                            )
-        write_text(data_path+"/screen.log", 'series id: ' + str(series_id) + ' -> OK')
+        if row[1].variable_name == 'tree stem radius change':  
+            # NOTE: makes sure that only dendrometer data is selected. there is also other sensor metadata stored in the same file.
+            print('series id: ' + str(row[1].series_id))
+            series_id = row[1].series_id
+            value = (series_id,)
+
+            data[series_id] = server.get_data_element(value, 
+                                                query,
+                                                credentials.get('user'), 
+                                                credentials.get('password'), 
+                                                credentials.get('host'), 
+                                                credentials.get('port'), 
+                                                credentials.get('dbname')
+                                                )
+            write_text(data_path+"/screen.log", 'series id: ' + str(series_id) + ' -> OK')
 
     with open(data_path+"/"+database+".pkl", 'wb') as f:
         pickle.dump(data, f)

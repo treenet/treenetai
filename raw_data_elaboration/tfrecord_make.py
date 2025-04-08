@@ -23,6 +23,7 @@ class DatasetConfiguration(object):
                  experiment_type,
                  normalization,
                  channels_to_fix,
+                 species_to_ignore,
                  file_type,
                  tree_number,
                  combination_samples,
@@ -46,6 +47,7 @@ class DatasetConfiguration(object):
         self.experiment_type = experiment_type
         self.normalization = normalization
         self.channels_to_fix = channels_to_fix
+        self.species_to_ignore = species_to_ignore
         self.file_type = file_type
         self.trees = tree_number
         self.combination_samples = combination_samples
@@ -63,40 +65,53 @@ class DatasetConfiguration(object):
         metadata = dpl.load_dataframe(self.metadata_path, self.file_type, "metadata")
         df = dpl.load_dataframe(self.data_path, self.file_type, "dfAll")
 
-        # metadata = dpl.clean_metadata(meta)
-        # metadata = meta
+        # NOTE: make sure that the column names are in the right order and that only the required ones are used
+        for data in df.values():
+            data = data[self.data_channels]  # NOTE: self.data_channels is a list of channels (column names) that should be used in the experiment
 
         if self.experiment_type == 'gap-filling':
             # TODO: the following line removes rare species.
             #  This should be automated and given as an option when running the code. A flag should be added.
-            index_names = metadata.loc[
-                metadata['species'].isin(['Sorbus aria', 'Larix decidua', 'Quercus robur'])].series_name.to_list()
+            
+            # TITLE: 1. Remove rare species
+            print('removing rare species...')
+            index_names = metadata.loc[ metadata['tree_species'].isin(self.species_to_ignore) ].series_id.to_list()
+            metadata = metadata[metadata.series_id.isin(index_names) == False].reset_index(drop=True)  # NOTE: removes rare species from metadata
 
-            metadata = metadata[metadata.series_name.isin(index_names) == False].reset_index(drop=True)
+            metadata_dictionary = {}
+            # NOTE: iterate over the metadata table and convert it to a dictionary in which the series_id is the key.
+            for index, row in metadata.iterrows():    
+                metadata_dictionary[row.series_id] = row
+
+            # TITLE: 2. Add day-of-year, month and other features to the data frame.
+            print('adding additional features to data frame...')
+            df_with_extra_features = dpl.add_features(df, metadata)
 
             segments = []
             print('constructing segments of desired length with gaps...')
             # TODO: test this part of the function and confirm that it works.
-            for value in df:
-                temp = dpl.make_segments(value, self.segment_length, self.time_resolution,
-                                         self.normalization, self.trees)
-                for el in temp:
-                    # Note: At this point the dataframe has been converted to a numpy array
-                    segments.extend(
-                        [dpl.add_gaps(el, self.segment_length, self.gap_size, self.gap_type, self.channels_to_fix),
-                        temp,
-                        metadata
-                        ]
-                    )
-                    # Note: The output looks like the following:
-                    #  [['LM with gaps', 'weather data with gaps', 'soil data with gaps'],
-                    #   ['LM', 'weather data', 'soil data'],
-                    #   [metadata]
+            for series_id, data in df_with_extra_features.items():
+                
+                # TITLE 3. Create segments for training and testing (remove also the time stamp)
+                list_of_segments = dpl.make_segments(data, self.segment_length, self.time_resolution, False)  # NOTE: time serie is split into segments (without normalisation)
+                
+                # TITLE 4. Add gaps to the segments, normalize and convert segment to numpy array (necessary for use with tensorflow)
+                for el in list_of_segments:
+                    el_with_gap, el_ground_truth, conversion = dpl.add_gaps(el, self.segment_length, self.gap_size, self.gap_type, self.channels_to_fix)
+                    # NOTE: At this point the dataframe has been converted to a numpy array
+                    segments.extend( [el_with_gap, el_ground_truth, metadata_dictionary[series_id], conversion] )
+                    # NOTE: The output looks like the following:
+                    #  [['LM with gaps', 'weather data with gaps', 'soil data with gaps', 'extra features with gaps'],
+                    #   ['LM', 'weather data', 'soil data', 'extra features'],
+                    #   [metadata],
+                    #   [rescaling constants for each channel] 
                     #  ]
-                    # NOTE: The format of the list is [[sample1_data_np.array, sample1_label_np.array, sample1_labels_np.array],
-                    #                                  [sample2_data_np.array, sample2_label_np.array, sample2_labels_np.array],
-                    #                                  [sample3_data_np.array, sample3_label_np.array, sample3_labels_np.array],
+                    #
+                    # NOTE: The format of the list is [[sample1_data_np.array, sample1_label_np.array, sample1_metadata_pd.df.record, sample1_scale_constants_np.array],
+                    #                                  [sample2_data_np.array, sample2_label_np.array, sample2_metadata_pd.df.record, sample1_scale_constants_np.array],
+                    #                                  [sample3_data_np.array, sample3_label_np.array, sample3_metadata_pd.df.record, sample1_scale_constants_np.array],
                     #                                  ....]
+            
 
         elif self.experiment_type == 'nearest-neighbours': # TODO: complete this function or remove it
             df, metadata = dpl.nn_signal_preparation(df, metadata)  # TODO: Add the number of neighbours to the script.
@@ -109,7 +124,7 @@ class DatasetConfiguration(object):
         elif self.experiment_type == 'reconstruction':
             print('constructing dataframe with all possible signal permutations...')
             # NOTE: it is necessary to first add time-series permutations to the original dataframe
-            df_with_permutations, new_meta_data = dpl.multi_dendro_channel(df, metadata, self.tree_species, self.trees,
+            df_with_permutations, new_meta_data = dpl.create_multi_dendro_channel(df, metadata, self.tree_species, self.trees,
                                                                            self.combination_samples,
                                                                            self.combination_samples_rand)
             # note: the data (df_with_permutations) is a list and new_meta_data is a dictionary
@@ -209,6 +224,7 @@ def main(_argv):
         'experiment type': FLAGS.experiment_type,
         'normalization': FLAGS.normalization,
         'channels to fix': FLAGS.channels_to_fix,
+        'species ignored': FLAGS.species_to_ignore,
         'number of dendrometer signals': FLAGS.tree_number,
         'combination_samples': FLAGS.combination_samples,
         'combination_samples_rand': FLAGS.combination_samples_rand,
@@ -240,6 +256,7 @@ def main(_argv):
                                        experiment_type=FLAGS.experiment_type,
                                        normalization=FLAGS.normalization,
                                        channels_to_fix=FLAGS.channels_to_fix,
+                                       species_to_ignore=FLAGS.species_to_ignore,
                                        file_type=FLAGS.file_type,
                                        tree_number=FLAGS.tree_number,
                                        combination_samples=FLAGS.combination_samples,
@@ -287,6 +304,7 @@ if __name__ == "__main__":
                                  'channels that are considered for gap filling. '
                                  'make sure that the indices correspond to the correct channel.'
                                  '0 should always represent the dendrometer signal.')
+    flags.DEFINE_string         ('species_to_ignore', ['Sorbus aria', 'Larix decidua', 'Quercus robur'], 'species that are rare and should be ignored')
     flags.DEFINE_string         ('file_type', 'pkl',
                                  'Type of file where data is stored.'
                                  'choices: rda, csv, npy, pkl')
