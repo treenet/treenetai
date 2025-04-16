@@ -1,10 +1,10 @@
 #!/bin/bash
 
-meta_path="/storage/lukovic/Data/FORWARDS/treenet/server_data/metadata.pkl"
+meta_path="/storage/lukovic/Data/FORWARDS/treenet/server_data/metadata_dendrometer.pkl"
 dendro_path="/storage/lukovic/Data/FORWARDS/treenet/server_data/data_dendro_lm.pkl"
 clima_path="/storage/lukovic/Data/FORWARDS/treenet/server_data/data_meteo_l2.pkl"
 out_folder="/home/lukovic/data/treenet/server_data/"
 
 python3 ~/codes/treenetai/raw_data_elaboration/transform_raw_data.py $meta_path $dendro_path $clima_path $out_folder
 
-mv /home/lukovic/data/treenet/server_data/combined_dendro_climate_dictionary.pkl /storage/lukovic/Data/FORWARDS/treenet/server_data/
+mv /home/lukovic/data/treenet/server_data/* /storage/lukovic/Data/FORWARDS/treenet/server_data/

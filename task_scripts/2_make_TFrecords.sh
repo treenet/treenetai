@@ -41,7 +41,7 @@
 # channels_to_fix:      this is necessary only if 'gap-filling' is used as the experiment type.
 #                       these are the channels of the time series that have to be trained for gap-filling.
 #                       each channel is represented by the following strings:
-
+#
 #                       'stem_radius'   - dendrometer
 #                       'temp'          - temperature
 #                       'rh'            - relative humidity 
@@ -56,8 +56,9 @@
 #-----------------------------------------------------------------------------------------------------------------------------#
 # NOTE: END
 
-
+#########################################
 # E N T E R the correct paths below
+#########################################
 dataPath=/storage/lukovic/Data/FORWARDS/treenet/server_data/combined_dendro_climate_dictionary.pkl
 metadataPath=/storage/lukovic/Data/FORWARDS/treenet/server_data/metadata.pkl
 tfrecordsDirPath=~/data/treenet/tfrecords
@@ -72,12 +73,12 @@ tfrecordsDirPath=~/data/treenet/tfrecords
 #  3) The parameters should be stored in a file and loaded directly from it.
 # TODO: END
 
-python ~/codes/treenetai/raw_data_elaboration/tfrecord_make.py \
+python3 ~/codes/treenetai/raw_data_elaboration/tfrecord_make.py \
         --file_id 1 \
         --file_type 'pkl' \
         --data_file_path $dataPath \
         --metadata_file_path $metadataPath \
-        --tfrecords_dir_path $tfrecordsDirPath\
+        --tfrecords_dir_path $tfrecordsDirPath \
         --species 'all' \
         --segment_length 30 \
         --time_resolution 6 \
@@ -88,7 +89,7 @@ python ~/codes/treenetai/raw_data_elaboration/tfrecord_make.py \
         --gap_size 10 \
         --gap_type 'constant' \
         --channels_to_fix '['stem_radius']' \
-        --species_to_ignore '['aria', 'robur']' \
+        --species_to_ignore '['aria','robur']' \
         --normalization \
         --notes 'climate data processing' \
 
@@ -105,5 +106,4 @@ python ~/codes/treenetai/raw_data_elaboration/tfrecord_make.py \
 #
 # NOTE: The format of the list is [[sample1_data_np.array, sample1_label_np.array, sample1_metadata_pd.df.record, sample1_scale_constants_np.array],
 #                                  [sample2_data_np.array, sample2_label_np.array, sample2_metadata_pd.df.record, sample1_scale_constants_np.array],
-#                                  [sample3_data_np.array, sample3_label_np.array, sample3_metadata_pd.df.record, sample1_scale_constants_np.array],
-#               
+#                                  [sample3_data_np.array, sample3_label_np.array, sample3_metadata_pd.df.record, sample1_scale_constants_np.array],...

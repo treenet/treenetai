@@ -30,7 +30,7 @@ def server_metadata(meta_path, credentials_path):
                                 credentials.get('port'), 
                                 credentials.get('dbname') )
     
-    with open(meta_path+"/metadata.pkl", 'wb') as f:
+    with open(meta_path+"/metadata_all.pkl", 'wb') as f:
         pickle.dump(meta, f)
 
     write_text(meta_path+"/screen.log", "Done...")
@@ -71,17 +71,21 @@ def server_data_dendrometer(database, data_path, credentials_path):
             value = (series_id,)
 
             data[series_id] = server.get_data_element(value, 
-                                                query,
-                                                credentials.get('user'), 
-                                                credentials.get('password'), 
-                                                credentials.get('host'), 
-                                                credentials.get('port'), 
-                                                credentials.get('dbname')
-                                                )
+                                                      query,
+                                                      credentials.get('user'), 
+                                                      credentials.get('password'), 
+                                                      credentials.get('host'), 
+                                                      credentials.get('port'), 
+                                                      credentials.get('dbname') )
+            
             write_text(data_path+"/screen.log", 'series id: ' + str(series_id) + ' -> OK')
 
     with open(data_path+"/"+database+".pkl", 'wb') as f:
         pickle.dump(data, f)
+
+    new_meta = meta[meta['variable_name'] == 'tree stem radius change'].copy()
+    with open(data_path+"/metadata_dendrometer.pkl", 'wb') as f:
+        pickle.dump(new_meta, f)
 
     write_text(data_path+"/screen.log", "Done...")
 

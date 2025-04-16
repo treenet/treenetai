@@ -1,23 +1,7 @@
 import pandas as pd
 import pickle
 
-
-def load_data(meta_path, df_path):
-    metatemp = pd.read_pickle(meta_path)
-    datatemp = pd.read_pickle(df_path)
-
-    metadata = dict()
-    dataframe = dict()
-
-    for e in datatemp:
-        if len(e) > 0:
-            key = e.series_id.iloc[0]
-            dataframe[key] = e
-            metadata[key] = metatemp[metatemp.series_id == key]
-
-        return metadata, dataframe
-
-
+# TITLE: METADATA STATISTICS ############################################
 def get_species(metadata):
     species = dict()
     genus_list = metadata.tree_genus.drop_duplicates().to_list()
@@ -45,21 +29,31 @@ def get_sites(metadata):
     return sites
 
 
+# TITLE: SEPARATION BY YEAR ############################################
+
 def get_yearly_data_by_id(dictionary):
-    # note: take care of leap years, they are also included
+    """ Separates the time series of each sensor into a list of time series by year. 
+    Creates a dictionary where the key is the series id and the value is a list of time series by year. 
+    """
+    # NOTE: take care of leap years, they are also included
     data_yr = dict()
-    for key, value in dictionary.items():
-        df_list = _ts_by_year(value)
+    for id, timeseries in dictionary.items():
+        df_list = _ts_by_year(timeseries)
         temp_list = []
         for e in df_list[:]:
             if e.doy.iloc[0] == 1 or e.doy.iloc[-1] > 364:
                 temp_list.append(e)
-        data_yr[key] = temp_list
+        data_yr[id] = temp_list
     return data_yr
 
 
-def get_yearly_data_by_year(dictionary):
-    # note: take care of leap years, they are also included
+def get_yearly_data_by_year(dictionary, yearly_by_id):
+    """ Sorts the yearly time series according to year. 
+    Creates a dictionary where the key is the year and the value are time series of different sensors of the same year. 
+    """
+    # NOTE: take care of leap years, they are also included
+    if not yearly_by_id:
+        dictionary = get_yearly_data_by_id(dictionary)
     data_by_year = dict()
     for key, value in dictionary.items():
         for e in value:
@@ -71,23 +65,11 @@ def get_yearly_data_by_year(dictionary):
     return data_by_year
 
 
-def get_monthly_data(metadata, data):
-    output = []
-    return output
-
-
-def save_data(metadata, data, period):
-    path = '/Users/lukovic/data/FORWARDS/TNT/raw_data/modified_data/'
-    with open(path + 'data_' + period + '.pkl', 'wb') as f:
-        pickle.dump(data, f)
-
-    with open(path + 'metadata_' + period + '.pkl', 'wb') as f:
-        pickle.dump(metadata, f)
-
-
 def _ts_by_year(data):
-    data['year'] = data.ts.dt.year  # note: add a column with the year
-    data['doy'] = data.ts.dayofyear  # note: add a column with the day of year
+    """ Separates a continuous time series into a list of yearly time series segments """
+    data.loc[:, 'year'] = data.ts.dt.year  # note: add a column with the year
+    data.loc[:, 'doy'] = data.ts.dt.dayofyear  # note: add a column with the day of year
+    data.loc[:, 'hour'] = data.ts.dt.hour  # note: add a column with the hour of day
     years = data.year.unique()
     output = []
     for year in years:
@@ -95,31 +77,134 @@ def _ts_by_year(data):
 
     return output
 
+# TITLE: SEPARATION BY MONTH ############################################
 
-def average_over_day(dataframe):
-    return
+def get_monthly_data(metadata, data):
+    output = []
+    return output
 
+# TITLE: COARSE-GRAINING BY TIME ############################################
 
-def average_over_hour(dataframe):
-    return
-
-
-def get_hourly_data(dictionary):
+# HOURLY scale
+def get_hourly_data_by_id_index(dictionary):
+    """ The function averages the data over every hour.
+    Input: dictionary where the key is the signal id and value is a time series with 10 min resolution
+    Output: dictionary where the key is the signal id and the value is a time series with 1 h resolution
+    IMPORTANT: make sure that the dataframes have DOY and hour columns
+    """
     new_dict = dict()
-    for key, value in dictionary.items():
-        new_dict[key] = []
-        for e in value:
-            new_dict[key].append(average_over_hour(e))
+    for id, timeseries in dictionary.items():  # note: Iterates over the years
+        timeseries.loc[:, 'year'] = timeseries.ts.dt.year  # note: add a column with the year
+        timeseries.loc[:, 'doy'] = timeseries.ts.dt.dayofyear  # note: add a column with the day of year
+        timeseries.loc[:, 'hour'] = timeseries.ts.dt.hour  # note: add a column with the hour of day
+        temp = timeseries.groupby(['year', 'doy', 'hour'])
+        new_dict[id] = _average_over_hour(temp)  # note: appends 
     return new_dict
 
 
-def get_daily_data(dictionary):
+def get_hourly_data_by_year_index(dictionary):
+    """ The function averages the data over every hour.
+    Input: dictionary where the key is the year and value is a list of yearly data with 10 min resolution
+    Output: dictionary where the key is the year and the value is a list of yearly data with 1 h resolution
+    IMPORTANT: make sure that the dataframes have DOY and hour columns
+    """
     new_dict = dict()
-    for key, value in dictionary.items():
-        new_dict[key] = []
-        for e in value:
-            new_dict[key].append(average_over_day(e))
+    for year, list in dictionary.items():  # note: Iterates over the years
+        new_dict[year] = []
+        for e in list:  # note: Iterates over different trees for the same year
+            temp = e.groupby(['doy', 'hour'])
+            new_dict[year].append(_average_over_hour(temp))  # note: appends 
     return new_dict
+
+
+# DAILY scale
+def get_daily_data_by_id_index(dictionary, hourly_data):  
+    # TODO: what to do if hourly_data is set as True but the input data has no 'year', 'doy' and 'hour' values? This has to be fixex.
+    """ The function averages the data over every day.
+    Input: dictionary where the key is the sensor id and value is a list of yearly data with 1h resolution
+    Output: dictionary where the key is the sensor id and the value is a list of yearly data with 1 day resolution
+    """
+    new_dict = dict()
+    if not hourly_data:
+        dictionary = get_hourly_data_by_id_index(dictionary)
+    for id, timeseries in dictionary.items():
+        temp = timeseries.groupby(['year', 'doy'])
+        new_dict[id] = (_average_over_day(temp))
+    return (new_dict)
+
+
+def get_daily_data_by_year_index(dictionary, hourly_data):
+    """ The function averages the data over every day.
+    Input: dictionary where the key is the year and value is a list of yearly data with 1h resolution
+    Output: dictionary where the key is the year and the value is a list of yearly data with 1 day resolution
+    """
+    new_dict = dict()
+    if not hourly_data:
+        dictionary = get_hourly_data_by_year_index(dictionary)
+    for year, list in dictionary.items():
+        new_dict[year] = []
+        for e in list:
+            temp = e.groupby(['doy'])
+            new_dict[year].append(_average_over_day(temp))
+    return (new_dict)
+
+
+def _average_over_hour(df_in):
+    d_out = {'index': [], 'series_id': [], 'ts': [], 'year': [], 'doy': [], 'hour': [], 'value': []}
+    for _, e in df_in:
+        d_out['index'].append(e.index[0])
+        d_out['series_id'].append(e.series_id.iloc[0])
+        d_out['ts'].append(e.ts.iloc[0])
+        d_out['year'].append(e.year.iloc[0])
+        d_out['doy'].append(e.doy.iloc[0])
+        d_out['hour'].append(e.hour.iloc[0])
+        d_out['value'].append(e.value.mean())  # NOTE: This is where the averaging is done
+    df_hourly = pd.DataFrame(d_out)
+    df_hourly.set_index('index', inplace=True)
+    df_hourly.index.name = ""
+
+    # NOTE: make sure that the first and last row are whole hours, without minutes (i.e. minutes = 0). 
+    # The last row might always be a whole hour due to the construction of the function. Check anyway.
+    # In positive case, remove the row.
+    if df_hourly.iloc[0].ts.minute != 0:
+        indx = df_hourly.iloc[0].name
+        df_hourly = df_hourly.drop(index=indx)
+
+    if df_hourly.iloc[-1].ts.minute != 0:
+        indx = df_hourly.iloc[-1].name
+        df_hourly = df_hourly.drop(index=indx)
+        
+    return df_hourly
+
+
+def _average_over_day(df_in):  # TODO: check this function
+    d_out = {'index': [], 'series_id': [], 'ts': [], 'year': [], 'doy': [], 'value': []}
+    for _, e in df_in:
+        d_out['index'].append(e.index[0])
+        d_out['series_id'].append(e.series_id.iloc[0])
+        d_out['ts'].append(e.ts.iloc[0])
+        d_out['year'].append(e.year.iloc[0])
+        d_out['doy'].append(e.doy.iloc[0])
+        d_out['value'].append(e.value.mean())  # NOTE: This is where the averaging is done
+    df_daily = pd.DataFrame(d_out)
+    df_daily.set_index('index', inplace=True)
+    df_daily.index.name = ""
+
+    # NOTE: make sure that the first and last row are whole hours, without minutes (i.e. minutes = 0). 
+    # The last row might always be a whole hour due to the construction of the function. Check anyway.
+    # In positive case, remove the row.
+    if df_daily.iloc[0].ts.hour != 0:
+        indx = df_daily.iloc[0].name
+        df_daily = df_daily.drop(index=indx)
+
+    if df_daily.iloc[-1].ts.hour != 0:
+        indx = df_daily.iloc[-1].name
+        df_daily = df_daily.drop(index=indx)
+
+    return df_daily
+        
+
+# TITLE: DATA-FRAME SPLITTING ############################################
 
 # https://towardsdatascience.com/how-to-split-a-tensorflow-dataset-into-train-validation-and-test-sets-526c8dd29438
 def split_ds( ds, ds_size, train_split=0.8, val_split=0.2, shuffle=True, shuffle_size=10000):
@@ -138,8 +223,10 @@ def split_ds( ds, ds_size, train_split=0.8, val_split=0.2, shuffle=True, shuffle
 
 if __name__ == "__main__":
 
-    meta, df = load_data("/Users/lukovic/data/FORWARDS/TNT/raw_data/metadata_Server.pkl",
-                             "/Users/lukovic/data/FORWARDS/TNT/raw_data/data_Server.pkl")
+    # NOTE: The code below is for testing the correctness of the functions above
+
+    df = pd.read_pickle("/storage/lukovic/Data/FORWARDS/treenet/server_data/combined_dendro_climate_dictionary.pkl")
+    meta = pd.read_pickle("/storage/lukovic/Data/FORWARDS/treenet/server_data/metadata.pkl")
 
     data_y = get_yearly_data_by_id(df)
     data_yr = get_yearly_data_by_year(data_y)
@@ -154,7 +241,7 @@ if __name__ == "__main__":
         list.append(b)
         indx.append(a)
 
-    df = {'index': [], 'series_id': [], 'ts': [], 'year': [], 'doy': [], 'hour': [], 'value': []}
+    df = {'index': [], 'series_id': [], 'ts': [], 'year': [], 'doy': [], 'hour': [], 'stem_radius': []}
 
     for e in list:
         df['index'].append(e.index[0])
@@ -163,8 +250,10 @@ if __name__ == "__main__":
         df['year'].append(e.year.iloc[0])
         df['doy'].append(e.doy.iloc[0])
         df['hour'].append(e.hour.iloc[0])
-        df['value'].append(e.value.mean())
+        df['stem_radius'].append(e.stem_radius.mean())
 
     df_hourly = pd.DataFrame(df)
     df_hourly.set_index('index', inplace=True)
     df_hourly.index.name = ""
+
+    print(df_hourly)

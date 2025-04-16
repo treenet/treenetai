@@ -97,9 +97,11 @@ class DatasetConfiguration(object):
                 
                 # TITLE 4. Add gaps to the segments, normalize and convert segment to numpy array (necessary for use with tensorflow)
                 for el in list_of_segments:
+                    
                     el_with_gap, el_ground_truth, conversion = dpl.add_gaps(el, self.segment_length, self.gap_size, self.gap_type, self.channels_to_fix)
                     # NOTE: At this point the dataframe has been converted to a numpy array
                     segments.extend( [el_with_gap, el_ground_truth, metadata_dictionary[series_id], conversion] )
+                    
                     # NOTE: The output looks like the following:
                     #  [['LM with gaps', 'weather data with gaps', 'soil data with gaps', 'extra features with gaps'],
                     #   ['LM', 'weather data', 'soil data', 'extra features'],
@@ -111,6 +113,8 @@ class DatasetConfiguration(object):
                     #                                  [sample2_data_np.array, sample2_label_np.array, sample2_metadata_pd.df.record, sample1_scale_constants_np.array],
                     #                                  [sample3_data_np.array, sample3_label_np.array, sample3_metadata_pd.df.record, sample1_scale_constants_np.array],
                     #                                  ....]
+                    #
+                    # NOTE: a concise format is [DATA, LABEL, METADATA, CONVERSION]
             
 
         elif self.experiment_type == 'nearest-neighbours': # TODO: complete this function or remove it
@@ -121,7 +125,7 @@ class DatasetConfiguration(object):
             #                              self.gap_size, self.gap_type, self.experiment_type, self.normalization,
             #                              self.channels_to_fix)
 
-        elif self.experiment_type == 'reconstruction':
+        elif self.experiment_type == 'reconstruction': # TODO: revise this function
             print('constructing dataframe with all possible signal permutations...')
             # NOTE: it is necessary to first add time-series permutations to the original dataframe
             df_with_permutations, new_meta_data = dpl.create_multi_dendro_channel(df, metadata, self.tree_species, self.trees,
@@ -181,6 +185,7 @@ class DatasetConfiguration(object):
                     'data/timeseries_input': dpl.get_feature(dpl.serialize_array(segment[0])),
                     'label/timeseries_label': dpl.get_feature(dpl.serialize_array(segment[1])),
                     'other/metadata': dpl.get_feature(dpl.serialize_array(segment[2])),
+                    'other/conversion': dpl.get_feature(dpl.serialize_array(segment[3]))
                     # Note: For more details look at
                     #  Ref: https://stackoverflow.com/questions/47861084/how-to-store-numpy-arrays-as-tfrecord
                 }
@@ -199,6 +204,7 @@ class DatasetConfiguration(object):
                     'data/timeseries_input': dpl.get_feature(dpl.serialize_array(segment[0])),
                     'label/timeseries_label': dpl.get_feature(dpl.serialize_array(segment[1])),
                     'other/metadata': dpl.get_feature(dpl.serialize_array(segment[2])),
+                    'other/conversion': dpl.get_feature(dpl.serialize_array(segment[3]))
                 }
 
                 # labels = segment[2]

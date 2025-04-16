@@ -3,6 +3,7 @@ import argparse
 import pickle
 
 import data_processing_library as dpl
+import tools.data_organisation as do
 
 
 if __name__ == "__main__":
@@ -23,8 +24,13 @@ if __name__ == "__main__":
         meta_id[row.series_id] = row
 
     df = {} # Initialize dictionary
+
+    hourly_dendro = do.get_hourly_data_by_id_index(dendro)
+
+    with open(args.output_folder+"/hourly_dendrometer_dictionary.pkl", 'wb') as f:
+        pickle.dump(hourly_dendro, f)
     
-    for key, data in dendro.items():
+    for key, data in hourly_dendro.items():
         print(key)
         climate_data = clima[meta_id[key].site_id]
         if len(data) > 0 and len(climate_data) > 0:

@@ -11,3 +11,5 @@ for database in metadata dendrometer climate; do
     path=~/data/treenet/server_data
     python3 ~/codes/treenetai/raw_data_elaboration/get_raw_data.py $database $path $credentials_path
 done
+
+mv /home/lukovic/data/treenet/server_data/* /storage/lukovic/Data/FORWARDS/treenet/server_data
