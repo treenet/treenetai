@@ -94,6 +94,7 @@ def get_hourly_data_by_id_index(dictionary):
     """
     new_dict = dict()
     for id, timeseries in dictionary.items():  # note: Iterates over the years
+        print("elaborating time series: ", id)
         timeseries.loc[:, 'year'] = timeseries.ts.dt.year  # note: add a column with the year
         timeseries.loc[:, 'doy'] = timeseries.ts.dt.dayofyear  # note: add a column with the day of year
         timeseries.loc[:, 'hour'] = timeseries.ts.dt.hour  # note: add a column with the hour of day

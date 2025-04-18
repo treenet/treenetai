@@ -44,6 +44,7 @@ def server_data_dendrometer(database, data_path, credentials_path):
         credentials = yaml.full_load(f)
 
     data = {}
+    new_meta = []
     meta = server.get_metadata( credentials.get('user'), 
                                 credentials.get('password'), 
                                 credentials.get('host'), 
@@ -70,20 +71,24 @@ def server_data_dendrometer(database, data_path, credentials_path):
             series_id = row[1].series_id
             value = (series_id,)
 
-            data[series_id] = server.get_data_element(value, 
+            temp = server.get_data_element(value, 
                                                       query,
                                                       credentials.get('user'), 
                                                       credentials.get('password'), 
                                                       credentials.get('host'), 
                                                       credentials.get('port'), 
                                                       credentials.get('dbname') )
-            
-            write_text(data_path+"/screen.log", 'series id: ' + str(series_id) + ' -> OK')
+            if len(temp) > 10:      
+                write_text(data_path+"/screen.log", 'series id: ' + str(series_id) + ' -> OK')
+                data[series_id] = temp
+                new_meta.append(row[1])
+            else:
+                write_text(data_path+"/screen.log", 'series id: ' + str(series_id) + ' -> empty or less than 10 rows')
 
-    with open(data_path+"/"+database+".pkl", 'wb') as f:
+    with open(data_path+"/"+database+"._dictionary.pkl", 'wb') as f:
         pickle.dump(data, f)
 
-    new_meta = meta[meta['variable_name'] == 'tree stem radius change'].copy()
+    new_meta = pd.DataFrame(new_meta)
     with open(data_path+"/metadata_dendrometer.pkl", 'wb') as f:
         pickle.dump(new_meta, f)
 
@@ -128,7 +133,7 @@ def server_data_climate(database, data_path, credentials_path):
                                                 )
         write_text(data_path+"/screen.log", 'series id: ' + str(site_id) + ' -> OK')
 
-    with open(data_path+"/"+database+".pkl", 'wb') as f:
+    with open(data_path+"/"+database+"_dictionary.pkl", 'wb') as f:
         pickle.dump(data, f)
 
     write_text(data_path+"/screen.log", "Done...")

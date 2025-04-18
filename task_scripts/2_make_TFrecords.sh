@@ -60,7 +60,7 @@
 # E N T E R the correct paths below
 #########################################
 dataPath=/storage/lukovic/Data/FORWARDS/treenet/server_data/combined_dendro_climate_dictionary.pkl
-metadataPath=/storage/lukovic/Data/FORWARDS/treenet/server_data/metadata.pkl
+metadataPath=/storage/lukovic/Data/FORWARDS/treenet/server_data/metadata_dendrometer.pkl
 tfrecordsDirPath=~/data/treenet/tfrecords
 #########################################
 

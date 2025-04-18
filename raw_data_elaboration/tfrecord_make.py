@@ -4,7 +4,7 @@ import tensorflow as tf
 from sklearn.model_selection import train_test_split
 import pickle as pk
 
-import data_processing_library as dpl
+import codes.treenetai.raw_data_elaboration.tools.data_processing_library as dpl
 
 
 class DatasetConfiguration(object):
@@ -84,8 +84,8 @@ class DatasetConfiguration(object):
                 metadata_dictionary[row.series_id] = row
 
             # TITLE: 2. Add day-of-year, month and other features to the data frame.
-            print('adding additional features to data frame...')
-            df_with_extra_features = dpl.add_features(df, metadata)
+            print('adding additional features to data frame...') 
+            df_with_extra_features = dpl.add_features(df, metadata)  # TODO: might not be necessary
 
             segments = []
             print('constructing segments of desired length with gaps...')
