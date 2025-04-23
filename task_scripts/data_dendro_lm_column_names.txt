@@ -1,0 +1,11 @@
+ts
+series_id
+value
+max
+twd
+gro_yr
+gro_start
+gro_end
+frost
+flags
+insert_date
