@@ -44,10 +44,11 @@ if __name__ == "__main__":
                 c['site_id'] = c['site_id'].astype(int) # NOTE: makes sure that the values are integers
                 c['series_id'] = c['series_id'].astype(int)
 
+                # NOTE: make sure that all the time stamps are present
                 start = c.ts.iloc[0]
                 end = c.ts.iloc[-1]
                 complete_times = {'ts': pd.date_range(start=start, end=end, freq='1h')}   # NOTE: alternative: "10Min". For more information see https://pandas.pydata.org/pandas-docs/stable/user_guide/timeseries.html#timeseries-offset-aliases
-                d = pd.merge(c, pd.DataFrame(complete_times), on = "ts", how = "outer")  # NOTE: make sure that all the time stamps are present
+                d = pd.merge(c, pd.DataFrame(complete_times), on = "ts", how = "outer")
                 df[key] = d
     
     with open(args.output_folder+"/combined_dendro_climate_dictionary.pkl", 'wb') as f:

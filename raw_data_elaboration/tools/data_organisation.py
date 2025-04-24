@@ -1,4 +1,6 @@
 import pandas as pd
+import metpy.calc as metpy
+from metpy.units import units
 import pickle
 
 # TITLE: METADATA STATISTICS ############################################
@@ -220,6 +222,19 @@ def split_ds( ds, ds_size, train_split=0.8, val_split=0.2, shuffle=True, shuffle
     train_ds = ds.take(train_size)
     val_ds = ds.skip(train_size)
     return train_ds, val_ds
+
+
+# TITLE: WEATHER TOOLSimport metpy.calc as metpy
+
+def getVPD(p, T, rh):
+    """ A simple function to calculate the VPD from atmospheric pressure, temperature and relative humidity. It uses the MetPy library. """
+    mixing_ratio = metpy.mixing_ratio_from_relative_humidity(p * units.hPa, T * units.degC, rh).to('g/kg')
+    svp = metpy.saturation_vapor_pressure(T * units.degC).to('hPa')
+    vp = metpy.vapor_pressure(p * units.hPa, mixing_ratio * units('g/kg')).to('hPa')
+    vpd = vp - svp
+    return vpd
+############################################
+
 
 
 if __name__ == "__main__":
