@@ -1,5 +1,0 @@
-ts
-site_id
-rh
-vpd
-insert_date
