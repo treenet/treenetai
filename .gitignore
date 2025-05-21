@@ -135,4 +135,6 @@ config_server.yml
 
 # Data files
 .pkl
-task_scripts/cosmo_data.ipynb
+
+# Directories
+/home/lukovic/codes/treenetai/local/
