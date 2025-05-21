@@ -137,4 +137,4 @@ config_server.yml
 .pkl
 
 # Directories
-/home/lukovic/codes/treenetai/local/
+local/
