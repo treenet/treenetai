@@ -62,23 +62,19 @@ def server_data_dendrometer(database, data_path, credentials_path):
     query = "SELECT * FROM " + database + " WHERE series_id=%s ORDER BY ts LIMIT 10" 
     
     for row in meta.iterrows():
-        #if row[1].tree_species == '-999':
-        #    print('series id: ' + str(row[1].series_id) + ' -> empty')
-        # else:
-
         if row[1].variable_name == "tree stem radius change":  
             # NOTE: makes sure that only dendrometer data is selected. there is also other sensor metadata stored in the same file.
             print('series id: ' + str(row[1].series_id))
             series_id = row[1].series_id
             value = (series_id,)
 
-            temp = server.get_data_element(value, 
-                                                      query,
-                                                      credentials.get('user'), 
-                                                      credentials.get('password'), 
-                                                      credentials.get('host'), 
-                                                      credentials.get('port'), 
-                                                      credentials.get('dbname') )
+            temp = server.get_data_element( value, 
+                                            query,
+                                            credentials.get('user'), 
+                                            credentials.get('password'), 
+                                            credentials.get('host'), 
+                                            credentials.get('port'), 
+                                            credentials.get('dbname') )
             if len(temp) > 10:      
                 write_text(data_path+"/screen_" + database + ".log", 'series id: ' + str(series_id) + ' -> OK')
                 data[series_id] = temp
@@ -118,22 +114,26 @@ def server_data_climate(database, data_path, credentials_path):
                               credentials.get('port'), 
                               credentials.get('dbname') )
     
-    query = "SELECT site_id,ts,temp,rh,swp,total_precip,rad,vpd, vpd_bo FROM " + database + " WHERE site_id=%s ORDER BY ts" 
+    query = "SELECT * FROM " + database + " WHERE site_id=%s ORDER BY ts" 
     
     for row in meta.iterrows():
-        print('series id: ' + str(row[1].site_id))
+        print('site id: ' + str(row[1].site_id))
         site_id = row[1].site_id
         value = (site_id,)
 
-        data[site_id] = server.get_data_element(value, 
-                                                query,
-                                                credentials.get('user'), 
-                                                credentials.get('password'), 
-                                                credentials.get('host'), 
-                                                credentials.get('port'), 
-                                                credentials.get('dbname')
-                                                )
-        write_text(data_path+"/screen_" + database + ".log", 'series id: ' + str(site_id) + ' -> OK')
+        temp = server.get_data_element( value, 
+                                        query,
+                                        credentials.get('user'), 
+                                        credentials.get('password'), 
+                                        credentials.get('host'), 
+                                        credentials.get('port'), 
+                                        credentials.get('dbname') )
+        if len(temp) > 10:      
+            write_text(data_path+"/screen_" + database + ".log", 'site id: ' + str(site_id) + ' -> OK')
+
+            data[site_id] = temp
+        else:
+            write_text(data_path+"/screen_" + database + ".log", 'site id: ' + str(site_id) + ' -> empty or less than 10 rows')
 
     with open(data_path + "/" + database + "_dictionary.pkl", 'wb') as f:
         pickle.dump(data, f)
@@ -142,7 +142,8 @@ def server_data_climate(database, data_path, credentials_path):
 
 
 def server_data(database, data_path, credentials_path):
-    """Connects to the TreeNet server and downloads the entire metadata table and all the non-empty time series data.
+    """ This download function is for the datasets with "all" in the name.
+        Connects to the TreeNet server and downloads the entire metadata table and all the non-empty time series data.
         The metadata is a pandas dataframe and the timeseries data is stored as a list of pandas dataframes."""
     
     write_text(data_path+"/screen_" + database + ".log", "Getting " + database + " ...")
@@ -166,23 +167,22 @@ def server_data(database, data_path, credentials_path):
                               credentials.get('port'), 
                               credentials.get('dbname') )
     
-    query = "SELECT ts, series_id, value FROM " + database + " WHERE series_id=%s ORDER BY ts"  
+    query = "SELECT * FROM " + database + " WHERE series_id=%s ORDER BY ts"  
     
     for row in meta.iterrows():
         variable = row[1].variable_name
         if variable == "air temperature" or variable == "relative humidity":  
-            # NOTE: makes sure that only dendrometer data is selected. there is also other sensor metadata stored in the same file.
             print('series id: ' + str(row[1].series_id))
             series_id = row[1].series_id
             value = (series_id,)
 
-            temp = server.get_data_element(value, 
-                                                      query,
-                                                      credentials.get('user'), 
-                                                      credentials.get('password'), 
-                                                      credentials.get('host'), 
-                                                      credentials.get('port'), 
-                                                      credentials.get('dbname') )
+            temp = server.get_data_element( value, 
+                                            query,
+                                            credentials.get('user'), 
+                                            credentials.get('password'), 
+                                            credentials.get('host'), 
+                                            credentials.get('port'), 
+                                            credentials.get('dbname') )
             if len(temp) > 10:      
                 write_text(data_path+"/screen_" + database + ".log", 'series id: ' + str(series_id) + ' -> OK')
                 if variable == "air temperature":

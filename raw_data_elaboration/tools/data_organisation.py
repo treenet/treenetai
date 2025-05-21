@@ -1,7 +1,12 @@
 import pandas as pd
+import pickle
+import os
+import numpy as np
+import h5py
+from datetime import datetime
 import metpy.calc as metpy
 from metpy.units import units
-import pickle
+
 
 # TITLE: METADATA STATISTICS ############################################
 def get_species(metadata):
@@ -29,6 +34,7 @@ def get_sites(metadata):
         sites[e] = [species, temp_df.shape[0], species_count, [siteXcor, siteYcor]]
 
     return sites
+
 
 
 # TITLE: SEPARATION BY YEAR ############################################
@@ -81,13 +87,46 @@ def _ts_by_year(data):
 
 # TITLE: SEPARATION BY MONTH ############################################
 
-def get_monthly_data(metadata, data):
+def get_monthly_data(metadata, data): # TODO
     output = []
     return output
 
 # TITLE: COARSE-GRAINING BY TIME ############################################
 
 # HOURLY scale
+
+def get_hourly_data(input):
+    """ The function averages the data over every hour.
+    Input: A time series with 10 min resolution
+    Output: A time series with 1 h resolution
+    IMPORTANT: make sure that the dataframes have DOY and hour columns
+    """
+    
+    df = input.copy() # NOTE: this dataframe copy process eliminates the SettingWithCopyWarning Error.
+
+    df.loc[:, 'year'] = df.ts.dt.year  # note: add a column with the year
+    df.loc[:, 'month'] = df.ts.dt.month  # note: add a column with the month
+    df.loc[:, 'day'] = df.ts.dt.day  # note: add a column with the month
+    df.loc[:, 'doy'] = df.ts.dt.dayofyear  # note: add a column with the day of year
+    df.loc[:, 'hour'] = df.ts.dt.hour  # note: add a column with the hour of day
+    
+    temp = df.groupby(['year', 'doy', 'hour'])
+    d_out = {'ts': [], 'value': []}
+    for _, e in temp:
+        d_out['ts'].append(pd.to_datetime(datetime(*[e.year.iloc[0], e.month.iloc[0], e.day.iloc[0], e.hour.iloc[0]])))
+        d_out['value'].append(e.value.mean())  # NOTE: This is where the averaging is done
+        # NOTE: AVERAGING - If the resolution of the data is 10 min, then the average is done over 6 values. However, often it is the 
+        # case that there are less than 6 values because some timestamps are missing. Therefore the average is done over fewer values. 
+        # I have decided to keep these values in order to avoid too many NaNs and therefore gaps in the data. The timestamp is always 
+        # taken to be the timestapm of the first row within the group. Minutes are not included when constructing the timestamp above, 
+        # therefore the timestamp will always have the minutes variable as zero. The reson for this is because, as already mentioned, 
+        # there are cases where data is missing and therefore the timestamp of the first row of the group might not have minutes equal 
+        # to zero. This then creates problems later. 
+    df_hourly = pd.DataFrame(d_out)
+    df_hourly.index.name = ""
+    
+    return df_hourly
+
 def get_hourly_data_by_id_index(dictionary):
     """ The function averages the data over every hour.
     Input: dictionary where the key is the signal id and value is a time series with 10 min resolution
@@ -205,6 +244,86 @@ def _average_over_day(df_in):  # TODO: check this function
         df_daily = df_daily.drop(index=indx)
 
     return df_daily
+
+
+# TITLE: TOOLS FOR MANAGING THE COSMO WEATHER DATA #######################
+
+def get_site_coordinates(metadata):
+    sites = {}
+    site_list = metadata.site_id.drop_duplicates().to_list()  # NOTE: there might be multiple entries for the same site id in the metadata table. Remove the duplicates
+    for e in site_list:
+        temp_df = metadata[metadata.site_id == e]
+        siteXcor = pd.to_numeric(temp_df.iloc[0].site_xcor)
+        siteYcor = pd.to_numeric(temp_df.iloc[0].site_ycor)
+        sites[e] = [siteXcor, siteYcor]
+    return sites
+
+def load_cosmo_grid(data_path : str, year : int, month : int, day : int) -> np.array:
+    # Load data from file
+    hf = h5py.File(data_path + '%04i/%04i%02i%02i.h5' % (year, year, month, day), 'r')
+    hf.keys()
+    cosmo_grid = np.array(hf.get('cosmo_grid'))
+
+    # Take only mean prediction
+    if len(cosmo_grid.shape) == 5:
+        cosmo_grid = cosmo_grid[..., 0].transpose(2, 0, 1, 3)
+    else:
+        cosmo_grid = cosmo_grid.transpose(2, 0, 1, 3)
+    cosmo_grid[:, :, :, [3, 4]] -= 273.15  # Convert temperatures from Kelvins into Degrees celsius
+    
+    return cosmo_grid[:, :, :, [3, 4]]  # NOTE: returns only the temperature and dwe temperature
+
+def get_site_cosmo_clima(sites, year_start, year_end, data_path):
+    """Iterates through all the sites and extracts the hourly temperature and dew 
+    temperature for all the data available in the data_path directory"""
+    
+    with open(data_path + 'height_map.pkl', 'rb') as f:
+        height_map = pickle.load(f)
+
+    clima_cosmo = {new_list: [] for new_list in sites.keys()}  
+    # NOTE: initialize the dictionary where the key is the site_id and the value is a list of multivariate climate data
+
+    # Get data from COSMO
+    for year in range(year_start, year_end+1):
+        dir_list = os.listdir(data_path + str(year))
+        for file in dir_list:
+            year = int(file[0:4])
+            month = int(file[4:6])
+            day = int(file[6:8])
+            cosmo_grid = load_cosmo_grid(data_path, year, month, day)  # NOTE: map containing the 8 quantities for each pixel for each hour
+            # Reshape COSMO forecasts to flatten across spatial dimensions
+            cosmo_flat = cosmo_grid.reshape(cosmo_grid.shape[0], -1, cosmo_grid.shape[3])  # NOTE: converts the 2D grid into a 1D array
+            # Use the min-distance index to extract COSMO variables for the desired location
+
+            for site_id, coord in sites.items():
+            
+                location = np.array(coord) # Coordinates from metadata of a tree in Birmensdorf
+
+                height, width, chans = height_map.shape
+                hmap = height_map.reshape(-1, chans)[:, :2]
+                all_dists = np.sqrt(((hmap[None, :, :] - location[None, None, :])**2).sum(axis=2)) # NOTE: (1, num_pts) contains the distance of all pixels with respect to a chosen point.
+
+                # Extract the index of location with minimum distance
+                min_idx = all_dists.argmin()
+
+                cosmo_location = cosmo_flat[:, min_idx, :]  # NOTE: numpy array with 24 rows and columns corresponding to the number of quantities chosen
+                hour = 0
+                for row in cosmo_location: 
+                # NOTE: iterate the list and add the timestamp and convert dew temperature to relative humidity
+                    value = row.tolist()
+                    clima_cosmo[site_id].append([pd.to_datetime(datetime(*[year,month,day,hour])), value[0], metpy.relative_humidity_from_dewpoint(value[0] * units.degC, value[1] * units.degC).to('percent').magnitude])
+                    # NOTE: make sure to use pd.to_datetime() funciton so that the timestamp is in the correct type, i.e. dtype=datetime64[ns]
+                    hour += 1
+    
+    
+    df_dictionary = {}
+    for site, list in clima_cosmo.items():
+    # NOTE: convert the dictionary of lists into a dictionary of dataframes. 
+        df_dictionary[site] = pd.DataFrame(list, columns = ['ts', 'cosmo_temp', 'cosmo_rh'])
+        
+    return df_dictionary 
+
+
         
 
 # TITLE: DATA-FRAME SPLITTING ############################################
@@ -224,7 +343,10 @@ def split_ds( ds, ds_size, train_split=0.8, val_split=0.2, shuffle=True, shuffle
     return train_ds, val_ds
 
 
-# TITLE: WEATHER TOOLSimport metpy.calc as metpy
+# TITLE: WEATHER TOOLS ############################################
+
+import metpy.calc as metpy
+from metpy.units import units
 
 def getVPD(p, T, rh):
     """ A simple function to calculate the VPD from atmospheric pressure, temperature and relative humidity. It uses the MetPy library. """
@@ -233,7 +355,22 @@ def getVPD(p, T, rh):
     vp = metpy.vapor_pressure(p * units.hPa, mixing_ratio * units('g/kg')).to('hPa')
     vpd = vp - svp
     return vpd
-############################################
+
+
+# TITLE: BASIC TOOLS ############################################
+
+def merge_time_series(dfs):
+    """Input: A list of dataframes with two coumns, (ts, value)
+       Output: A single dataframe with multiple columns, (ts, value1, value2, ....) 
+    """
+    merged_df = dfs[0]
+    for df in dfs[1:]:
+        merged_df = pd.merge(merged_df, df, on='ts', how='outer')
+    return merged_df
+
+
+####################################### E N D #################################################
+###############################################################################################
 
 
 
@@ -245,7 +382,7 @@ if __name__ == "__main__":
     meta = pd.read_pickle("/storage/lukovic/Data/FORWARDS/treenet/server_data/metadata.pkl")
 
     data_y = get_yearly_data_by_id(df)
-    data_yr = get_yearly_data_by_year(data_y)
+    data_yr = get_yearly_data_by_year(data_y, yearly_by_id=True)
 
     element = data_yr[2002][0]
 
