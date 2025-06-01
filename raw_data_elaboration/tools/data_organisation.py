@@ -248,9 +248,8 @@ def _average_over_day(df_in):  # TODO: check this function
 
 # TITLE: TOOLS FOR MANAGING THE COSMO WEATHER DATA #######################
 
-def get_site_coordinates(metadata):
+def get_site_coordinates(site_list, metadata):
     sites = {}
-    site_list = metadata.site_id.drop_duplicates().to_list()  # NOTE: there might be multiple entries for the same site id in the metadata table. Remove the duplicates
     for e in site_list:
         temp_df = metadata[metadata.site_id == e]
         siteXcor = pd.to_numeric(temp_df.iloc[0].site_xcor)
@@ -273,15 +272,42 @@ def load_cosmo_grid(data_path : str, year : int, month : int, day : int) -> np.a
     
     return cosmo_grid[:, :, :, [3, 4]]  # NOTE: returns only the temperature and dwe temperature
 
-def get_site_cosmo_clima(sites, year_start, year_end, data_path):
+def treenet_to_cosmo_grid_sites(data_path, site_coordinates):
+    """Converts the TreeNet site ids to cosmo grid ids by matching the nearest coordinates.
+        Input: TreeNet site ids and corresponding coordinates in the form of a dictionary.
+        Output: COSMO grid ids.
+    """
+    with open(data_path + 'height_map.pkl', 'rb') as f:
+        elevation_map = pickle.load(f)
+
+    conversion = {}
+
+    _, _, channels = elevation_map.shape
+    # NOTE: elevation_map has the shape (# horizontal cells, # vertical cells, 3). For each grid point (horizontal cell, vertical cell), 
+    # height map gives an array with 3 elements of the form (latitude, longitude, elevation above sea level)
+    cosmo_coordinates_temp = elevation_map.reshape(-1, channels)[:, :2]
+    cosmo_coordinates = cosmo_coordinates_temp[:,[1,0]]  # NOTE: the coordinates in the COSMO file are inverted. This line corrects it.
+
+    for site_id, coord in site_coordinates.items():
+        
+        treenet_coordinates = np.array(coord) # Coordinates from metadata of a tree in Birmensdorf
+       
+        # NOTE: cosmo_coordinates is a list of coordinates of all cells in the grid. 
+        all_dists = np.sqrt(((cosmo_coordinates[None, :, :] - treenet_coordinates[None, None, :])**2).sum(axis=2)) # NOTE: (1, num_pts) contains the distance of all pixels with respect to a chosen point.
+        # Extract the index of location with minimum distance
+        min_idx = all_dists.argmin()
+        conversion[site_id] = min_idx
+        
+    return conversion
+
+def get_site_cosmo_clima(site_coordinates, year_start, year_end, data_path):
     """Iterates through all the sites and extracts the hourly temperature and dew 
     temperature for all the data available in the data_path directory"""
     
-    with open(data_path + 'height_map.pkl', 'rb') as f:
-        height_map = pickle.load(f)
-
-    clima_cosmo = {new_list: [] for new_list in sites.keys()}  
+    clima_cosmo = {new_list: [] for new_list in site_coordinates.keys()}  
     # NOTE: initialize the dictionary where the key is the site_id and the value is a list of multivariate climate data
+
+    cosmo_ids = treenet_to_cosmo_grid_sites(data_path, site_coordinates)  # NOTE: for every TreeNet site, returns the closes COSMO grid id.
 
     # Get data from COSMO
     for year in range(year_start, year_end+1):
@@ -295,35 +321,22 @@ def get_site_cosmo_clima(sites, year_start, year_end, data_path):
             cosmo_flat = cosmo_grid.reshape(cosmo_grid.shape[0], -1, cosmo_grid.shape[3])  # NOTE: converts the 2D grid into a 1D array
             # Use the min-distance index to extract COSMO variables for the desired location
 
-            for site_id, coord in sites.items():
-            
-                location = np.array(coord) # Coordinates from metadata of a tree in Birmensdorf
-
-                height, width, chans = height_map.shape
-                hmap = height_map.reshape(-1, chans)[:, :2]
-                all_dists = np.sqrt(((hmap[None, :, :] - location[None, None, :])**2).sum(axis=2)) # NOTE: (1, num_pts) contains the distance of all pixels with respect to a chosen point.
-
-                # Extract the index of location with minimum distance
-                min_idx = all_dists.argmin()
-
-                cosmo_location = cosmo_flat[:, min_idx, :]  # NOTE: numpy array with 24 rows and columns corresponding to the number of quantities chosen
+            for site_id in site_coordinates.keys():
+                cosmo_cell_climate = cosmo_flat[:, cosmo_ids[site_id], :]  # NOTE: numpy array with 24 rows and columns corresponding to the number of quantities chosen
                 hour = 0
-                for row in cosmo_location: 
+                for row in cosmo_cell_climate:
                 # NOTE: iterate the list and add the timestamp and convert dew temperature to relative humidity
                     value = row.tolist()
-                    clima_cosmo[site_id].append([pd.to_datetime(datetime(*[year,month,day,hour])), value[0], metpy.relative_humidity_from_dewpoint(value[0] * units.degC, value[1] * units.degC).to('percent').magnitude])
+                    clima_cosmo[site_id].append([pd.to_datetime(datetime(year,month,day,hour)), value[0], metpy.relative_humidity_from_dewpoint(value[0] * units.degC, value[1] * units.degC).to('percent').magnitude])
                     # NOTE: make sure to use pd.to_datetime() funciton so that the timestamp is in the correct type, i.e. dtype=datetime64[ns]
                     hour += 1
     
-    
     df_dictionary = {}
     for site, list in clima_cosmo.items():
-    # NOTE: convert the dictionary of lists into a dictionary of dataframes. 
+        # NOTE: convert the dictionary of lists into a dictionary of dataframes. 
         df_dictionary[site] = pd.DataFrame(list, columns = ['ts', 'cosmo_temp', 'cosmo_rh'])
         
-    return df_dictionary 
-
-
+    return df_dictionary
         
 
 # TITLE: DATA-FRAME SPLITTING ############################################
