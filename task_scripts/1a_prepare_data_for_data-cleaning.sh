@@ -27,7 +27,7 @@
 # signal.
 ####################################################################################################################
 
-meta="/storage/lukovic/Data/FORWARDS/treenet/server_data/metadata_all.pkl"
+meta_path="/storage/lukovic/Data/FORWARDS/treenet/server_data/metadata_all.pkl"
 meta_temperature_l1="/storage/lukovic/Data/FORWARDS/treenet/server_data/metadata_data_all_l1_temperature.pkl"
 meta_humidity_l1="/storage/lukovic/Data/FORWARDS/treenet/server_data/metadata_data_all_l1_humidity.pkl"
 
@@ -38,8 +38,11 @@ clima_l2="/storage/lukovic/Data/FORWARDS/treenet/server_data/data_meteo_l2_dicti
 clima_lm="/storage/lukovic/Data/FORWARDS/treenet/server_data/data_meteo_lm_dictionary.pkl"
 cosmo_data_folder="/storage/lukovic/Data/FORWARDS/treenet/COSMO_FromCirrus/"
 
-out_folder="/home/lukovic/data/treenet/server_data/processed"
+year_start=2017
+year_end=2023
 
-python3 ~/codes/treenetai/raw_data_elaboration/prepare_data_for_data-cleaning.py $meta_path $meta_temperature_l1 $meta_humidity_l1 $temperature_l1 $humidity_l1 $clima_l2 $clima_lm $cosmo_data_folder $out_folder
+output_folder="/home/lukovic/data/treenet/server_data/processed/"
 
-mv /home/lukovic/data/treenet/server_data/processed* /storage/lukovic/Data/FORWARDS/treenet/server_data/processed
+python3 ~/codes/treenetai/raw_data_elaboration/prepare_data_for_data-cleaning.py $meta_path $meta_temperature_l1 $meta_humidity_l1 $temperature_l1 $humidity_l1 $clima_l2 $clima_lm $cosmo_data_folder $year_start $year_end $output_folder
+
+mv /home/lukovic/data/treenet/server_data/processed/* /storage/lukovic/Data/FORWARDS/treenet/server_data/processed/
