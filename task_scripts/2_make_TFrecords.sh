@@ -21,12 +21,15 @@
 #                       vector to accomodate 1 hour. If the resolution of the raw data is 1hr, then one cell is enough.
 #-----------------------------------------------------------------------------------------------------------------------------#
 # data_channels:        the features measured over time to be considered (stem radius, temperature, etc...)
-#                       There are more features than might be required. Fore example the series and site identifications are
-#                       not necessary for training the model and should therefore not be included. For options, see the section
-#                       channels_to_fix below. IMPORTANT: always include the time stamp. It is necessary for other functions. 
-#                       The time stamp will be automatically removed when the segments are created (make_segments() function).                       
+#                       There are more features than might be required. Fore example the series and site identifications (IDs) 
+#                       are not necessary for training the model and should therefore not be included. For options, see the 
+#                       section channels_to_fix below. IMPORTANT: always include the time stamp. It is necessary for other 
+#                       functions. The time stamp will be automatically removed when the segments are created (make_segments() 
+#                       function).                       
 #-----------------------------------------------------------------------------------------------------------------------------#
-# experiment_type:      gap-filling (others in preparation)
+# experiment_type:      'gap-filling' - gap-filling dendrometer data
+#                       'climate-processing' - processing climate data from L1 to Lm
+#                       (others in preparation)
 #-----------------------------------------------------------------------------------------------------------------------------#
 # data_split:           train:validation spllit of the data. the value indicated is the proportion used for validation
 #-----------------------------------------------------------------------------------------------------------------------------#
@@ -59,8 +62,8 @@
 #########################################
 # E N T E R the correct paths below
 #########################################
-dataPath=/storage/lukovic/Data/FORWARDS/treenet/server_data/combined_dendro_climate_dictionary.pkl
-metadataPath=/storage/lukovic/Data/FORWARDS/treenet/server_data/metadata_dendrometer.pkl
+dataPath=/storage/lukovic/Data/FORWARDS/treenet/server_data/processed/weather_data.pkl
+metadataPath=/storage/lukovic/Data/FORWARDS/treenet/server_data/metadata_all.pkl
 tfrecordsDirPath=~/data/treenet/tfrecords
 #########################################
 
@@ -81,17 +84,19 @@ python3 ~/codes/treenetai/raw_data_elaboration/tfrecord_make.py \
         --tfrecords_dir_path $tfrecordsDirPath \
         --species 'all' \
         --segment_length 30 \
-        --time_resolution 6 \
+        --time_resolution 1 \
         --data_channels '['ts','stem_radius','temp','rh','vpd','rad','swp','total_precip']' \
-        --experiment_type 'gap-filling' \
+        --experiment_type 'climate-processing' \
         --data_split 0.2 \
         --random_state 1 \
         --gap_size 10 \
         --gap_type 'constant' \
-        --channels_to_fix '['stem_radius']' \
+        --channels_to_fix 0 \
         --species_to_ignore '['aria','robur']' \
         --normalization \
-        --notes 'climate data processing' \
+        --notes 'climate data processing trials' \
+
+mv ~/data/treenet/tfrecords/* /storage/lukovic/Data/FORWARDS/treenet/tfrecords
 
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #

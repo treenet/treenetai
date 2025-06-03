@@ -166,6 +166,8 @@ def _rescale_all(segment):
         raise Exception(f'The dimension of the segment array should be 2. '
                         f'In this case the shape of the array is ' + str(segment.shape))
 
+    min_vals = []
+    differences = []
     for e in list(segment):
         if e == 'hour':
             segment.loc[:, e] = segment.loc[:, e].div(24)
@@ -182,11 +184,16 @@ def _rescale_all(segment):
             if np.abs(difference) > 1e-4:
                 segment.loc[:, e] = _normalize(segment.loc[:, e], min_val, difference)
             else:
-                    # NOTE: if the min/max difference is very small the signal is shifted, without division. this also avoids problems of division by zero
-                    #       in the _normalize() function.
-                    segment.loc[:, e] = segment.loc[:, e] - min_val
+                # NOTE: if the min/max difference is very small the signal is shifted, without division. this also avoids problems of division by zero
+                #       in the _normalize() function.
+                segment.loc[:, e] = segment.loc[:, e] - min_val
+                difference = 1
+                
+        min_vals.append(float(min_val))
+        differences.append(float(difference))
 
-    return np.asarray(segment.apply(pd.to_numeric)), min_val, difference
+    return np.asarray(segment.apply(pd.to_numeric)), np.asarray(min_vals), np.asarray(differences)
+
 
 
 def _normalize(array, base, diff):

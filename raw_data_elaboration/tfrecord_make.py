@@ -4,7 +4,7 @@ import tensorflow as tf
 from sklearn.model_selection import train_test_split
 import pickle as pk
 
-import codes.treenetai.raw_data_elaboration.tools.data_processing_library as dpl
+import tools.data_processing_library as dpl
 
 
 class DatasetConfiguration(object):
@@ -65,13 +65,13 @@ class DatasetConfiguration(object):
         metadata = dpl.load_dataframe(self.metadata_path, self.file_type, "metadata")
         df = dpl.load_dataframe(self.data_path, self.file_type, "dfAll")
 
-        # NOTE: make sure that the column names are in the right order and that only the required ones are used
-        for data in df.values():
-            data = data[self.data_channels]  # NOTE: self.data_channels is a list of channels (column names) that should be used in the experiment
-
         if self.experiment_type == 'gap-filling':
             # TODO: the following line removes rare species.
             #  This should be automated and given as an option when running the code. A flag should be added.
+
+            # NOTE: make sure that the column names are in the right order and that only the required ones are used
+            for data in df.values():
+                data = data[self.data_channels]  # NOTE: self.data_channels is a list of channels (column names) that should be used in the experiment
             
             # TITLE: 1. Remove rare species
             print('removing rare species...')
@@ -100,7 +100,7 @@ class DatasetConfiguration(object):
                     
                     el_with_gap, el_ground_truth, conversion = dpl.add_gaps(el, self.segment_length, self.gap_size, self.gap_type, self.channels_to_fix)
                     # NOTE: At this point the dataframe has been converted to a numpy array
-                    segments.extend( [el_with_gap, el_ground_truth, metadata_dictionary[series_id], conversion] )
+                    segments.append( [el_with_gap, el_ground_truth, metadata_dictionary[series_id], conversion] )
                     
                     # NOTE: The output looks like the following:
                     #  [['LM with gaps', 'weather data with gaps', 'soil data with gaps', 'extra features with gaps'],
@@ -115,7 +115,17 @@ class DatasetConfiguration(object):
                     #                                  ....]
                     #
                     # NOTE: a concise format is [DATA, LABEL, METADATA, CONVERSION]
-            
+        
+        elif self.experiment_type == 'climate-processing':
+            segments = []
+            for data in df:
+                data['hour'] = pd.to_datetime(data['ts']).dt.hour
+                data['doy'] = data.ts.dt.dayofyear
+                list_of_segments = dpl.make_segments(data, self.segment_length, self.time_resolution, True)
+                for el in list_of_segments:
+                    segments.append([el[0][:,[0,1,2,3,6,7]], el[0][:,[4,5]], [el[1], el[2]]])
+                    # NOTE: The output looks like the following:
+                    # [ [cosmo_temp, cosmo_rh, temp_raw, rh_raw, hour, DOY], [temp_processed, rh_processed], [ [list of minimum values], [list of differences] ] ]
 
         elif self.experiment_type == 'nearest-neighbours': # TODO: complete this function or remove it
             df, metadata = dpl.nn_signal_preparation(df, metadata)  # TODO: Add the number of neighbours to the script.
@@ -184,8 +194,8 @@ class DatasetConfiguration(object):
                 features = {
                     'data/timeseries_input': dpl.get_feature(dpl.serialize_array(segment[0])),
                     'label/timeseries_label': dpl.get_feature(dpl.serialize_array(segment[1])),
-                    'other/metadata': dpl.get_feature(dpl.serialize_array(segment[2])),
-                    'other/conversion': dpl.get_feature(dpl.serialize_array(segment[3]))
+                    #'other/metadata': dpl.get_feature(dpl.serialize_array(segment[2])),
+                    'other/conversion': dpl.get_feature(dpl.serialize_array(segment[2]))
                     # Note: For more details look at
                     #  Ref: https://stackoverflow.com/questions/47861084/how-to-store-numpy-arrays-as-tfrecord
                 }
@@ -203,8 +213,8 @@ class DatasetConfiguration(object):
                 features = {
                     'data/timeseries_input': dpl.get_feature(dpl.serialize_array(segment[0])),
                     'label/timeseries_label': dpl.get_feature(dpl.serialize_array(segment[1])),
-                    'other/metadata': dpl.get_feature(dpl.serialize_array(segment[2])),
-                    'other/conversion': dpl.get_feature(dpl.serialize_array(segment[3]))
+                    #'other/metadata': dpl.get_feature(dpl.serialize_array(segment[2])),
+                    'other/conversion': dpl.get_feature(dpl.serialize_array(segment[2]))
                 }
 
                 # labels = segment[2]
@@ -310,7 +320,7 @@ if __name__ == "__main__":
                                  'channels that are considered for gap filling. '
                                  'make sure that the indices correspond to the correct channel.'
                                  '0 should always represent the dendrometer signal.')
-    flags.DEFINE_string         ('species_to_ignore', ['Sorbus aria', 'Larix decidua', 'Quercus robur'], 'species that are rare and should be ignored')
+    flags.DEFINE_list           ('species_to_ignore', ['Sorbus aria', 'Larix decidua', 'Quercus robur'], 'species that are rare and should be ignored')
     flags.DEFINE_string         ('file_type', 'pkl',
                                  'Type of file where data is stored.'
                                  'choices: rda, csv, npy, pkl')

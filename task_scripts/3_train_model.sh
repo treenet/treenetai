@@ -3,7 +3,7 @@
 export EXPERIMENTS=/storage/lukovic/Data/FORWARDS/treenet/experiments/
 export DATA=/storage/lukovic/Data/FORWARDS/treenet/processed_data/tfrecords/
 
-EXP_DESC="test_GPU_node04"
+EXP_DESC="test_GPU_node05"
 
 python ~/codes/training.py \
   --timeseries_label \
