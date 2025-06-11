@@ -138,3 +138,4 @@ config_server.yml
 
 # Directories
 local/
+models/trained/

@@ -1,17 +1,20 @@
 from functools import partial
 import tensorflow as tf
-from apps.raw_data_elaboration.feature_descriptions import treenet_timeseries_short
+from raw_data_elaboration.feature_descriptions import treenet_timeseries_short
 
 
 def read_tfrecord(example, labelling_pattern):
     # TODO: the tfrecord_feature_format structure should be passed from the very beginning.
     tfrecord_feature_format = treenet_timeseries_short
     example = tf.io.parse_single_example(example, tfrecord_feature_format)
+    
+    # TITLE: load input
     timeseries_input = tf.io.parse_tensor(example["data/timeseries_input"], out_type=tf.float64)
     # NOTE: restore 2D array from byte string
     print('timeseries_input in function: ', timeseries_input)
 
-    # TODO: the labels have to be organized better so that they work. The labels are loaded automatically,
+    # TODO: #########################################################################################################
+    #  The labels have to be organized better so that they work. The labels are loaded automatically,
     #  so this is not the problem. The problem is when a non-matching label is passed through the 2_train.sh file.
     #  This is also related to the config file, which has to be addapted somehow. The labels should be printed onto
     #  the info file when the tfrecords are created. The config file should not have static names of labels. Rather, the
@@ -20,17 +23,24 @@ def read_tfrecord(example, labelling_pattern):
     # if labelling_pattern["timeseries_label"]:
     #     timeseries_label = tf.io.parse_tensor(example["label/timeseries_label"], out_type=tf.float64)
     #     labels.append(timeseries_label)
-
     # label = tf.stack(labels)
-
     # return timeseries_input, label
-    # TODO: END
+    # TODO: END #####################################################################################################
 
-    timeseries_label = tf.io.parse_tensor(example["label/timeseries_label"], out_type=tf.float64)
+    # TITLE: load labels
+    timeseries_label = tf.io.parse_tensor(example["data/timeseries_label"], out_type=tf.float64)
     # timeseries_metadata = tf.io.parse_tensor(example["other/metadata"], out_type=tf.string)
     # TODO: the metadata has to be included in some other way, or there should be a flag so that it is not loaded for
     #  training and testing.
+
+    # TITLE: make sure that the tensors are in the correct shape
+    shape = example['other/shape']
+    timeseries_input = tf.reshape(timeseries_input, shape)
+    timeseries_label = tf.reshape(timeseries_label, shape)
+
+
     return timeseries_input, timeseries_label
+
 
 
 def load_dataset(filename, labelling_pattern=None, num_parallel_calls=None):

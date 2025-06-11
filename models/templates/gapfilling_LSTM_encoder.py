@@ -1,7 +1,7 @@
 import tensorflow as tf
 
 
-class LSTM_encoder:
+class gapfilling_LSTM_encoder:
     def __init__(
         self,
         inputs,
@@ -10,7 +10,7 @@ class LSTM_encoder:
         dropouts=[0.4],
         **kwargs  # allows us to ignore other keywords
     ):
-        super(LSTM_encoder, self).__init__()
+        super(gapfilling_LSTM_encoder, self).__init__()
         self.inputs = inputs
         self.aug_model = aug_model
         self.reg_model = reg_model

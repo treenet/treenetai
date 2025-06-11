@@ -83,7 +83,7 @@ def setup_model_and_datasets(config):
         inputs=inputs,
         aug_model=augmentation_model,
         reg_model=regression_model,
-        **vars(config),
+        **vars(config)
     )
 
     ########################################################################

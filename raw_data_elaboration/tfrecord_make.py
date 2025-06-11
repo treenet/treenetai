@@ -123,7 +123,12 @@ class DatasetConfiguration(object):
                 data['doy'] = data.ts.dt.dayofyear
                 list_of_segments = dpl.make_segments(data, self.segment_length, self.time_resolution, True)
                 for el in list_of_segments:
-                    segments.append([el[0][:,[0,1,2,3,6,7]], el[0][:,[4,5]], [el[1], el[2]]])
+                    input_array = el[0][:,[0,1,2,3,6,7]]
+                    label_array = el[0][:,[0,1,2,3,6,7]]
+                    min_values = el[1]
+                    differences = el[2]
+                    segments.append( [ input_array, label_array, min_values, differences ] )
+                    # TODO: the normalization constants should be regrouped so that 6 are related to the input data and 2 to the ground truth.
                     # NOTE: The output looks like the following:
                     # [ [cosmo_temp, cosmo_rh, temp_raw, rh_raw, hour, DOY], [temp_processed, rh_processed], [ [list of minimum values], [list of differences] ] ]
 
@@ -184,47 +189,40 @@ class DatasetConfiguration(object):
         with open(self.tfrecords_path+'/validation_' + str(FLAGS.file_id) + '.pkl', 'wb') as f:
             pk.dump(validation, f)
 
-        print('writing train segments to TFrecord file...')
-        # note: see https://pub.towardsai.net/writing-tfrecord-files-the-right-way-7c3cee3d7b12
-        with tf.io.TFRecordWriter(self.train_path) as writer:  # Todo: merge the two for cycles below into one
-            for segment in train:
-                # NOTE: The segment list contains three items : a multidimensional numpy array (the multichannel
-                #  input time series) or segment[0], the multichannel label time series
-                #  and a list of metadata values, which are used as the labels for each time series i.e. segment[1].
-                features = {
-                    'data/timeseries_input': dpl.get_feature(dpl.serialize_array(segment[0])),
-                    'label/timeseries_label': dpl.get_feature(dpl.serialize_array(segment[1])),
-                    #'other/metadata': dpl.get_feature(dpl.serialize_array(segment[2])),
-                    'other/conversion': dpl.get_feature(dpl.serialize_array(segment[2]))
-                    # Note: For more details look at
-                    #  Ref: https://stackoverflow.com/questions/47861084/how-to-store-numpy-arrays-as-tfrecord
-                }
-                # labels = segment[2]
-                # for col, row in labels.items():
-                #    # TODO: This 'for loop' can be part of a 'get_schema()' function in the pandas2tfrecords file
-                #    features['label/'+col] = dpl.get_feature(row)
+        train_set = [train, "train", self.train_path]
+        validation_set = [validation, "validation", self.test_path]
 
-                tf_example = tf.train.Example(features=tf.train.Features(feature=features))
-                writer.write(tf_example.SerializeToString())
+        for dataset in [train_set, validation_set]:
+            print('writing' + dataset[1] + 'segments to TFrecord file...')
+            # note: see https://pub.towardsai.net/writing-tfrecord-files-the-right-way-7c3cee3d7b12
+            with tf.io.TFRecordWriter(dataset[2]) as writer:  # Todo: merge the two for cycles below into one
+                for segment in dataset[0]:
+                    # NOTE: The segment list contains three items : a multidimensional numpy array (the multichannel
+                    #  input time series) or segment[0], the multichannel label time series
+                    #  and a list of metadata values, which are used as the labels for each time series i.e. segment[1].
+                    
+                    input_array = segment[0].astype(np.float64)
+                    label_array = segment[1].astype(np.float64)
+                    minval = segment[2].astype(np.float64)
+                    diff = segment[3].astype(np.float64)
 
-        print('writing validation segments to TFrecord file...')
-        with tf.io.TFRecordWriter(self.test_path) as writer:
-            for segment in validation:
-                features = {
-                    'data/timeseries_input': dpl.get_feature(dpl.serialize_array(segment[0])),
-                    'label/timeseries_label': dpl.get_feature(dpl.serialize_array(segment[1])),
-                    #'other/metadata': dpl.get_feature(dpl.serialize_array(segment[2])),
-                    'other/conversion': dpl.get_feature(dpl.serialize_array(segment[2]))
-                }
+                    features = {
+                        'data/timeseries_input': dpl.get_feature(dpl.serialize_array(input_array)),
+                        'data/timeseries_label': dpl.get_feature(dpl.serialize_array(label_array)),
+                        'other/min_values': dpl.get_feature(dpl.serialize_array(minval)),
+                        'other/differences': dpl.get_feature(dpl.serialize_array(diff)),
+                        'other/shape': tf.train.Feature(int64_list=tf.train.Int64List(value=input_array.shape)),
+                        #'other/metadata': dpl.get_feature(dpl.serialize_array(segment[3])),
+                        # Note: For more details look at
+                        #  Ref: https://stackoverflow.com/questions/47861084/how-to-store-numpy-arrays-as-tfrecord
+                    }
+                    # labels = segment[2]
+                    # for col, row in labels.items():
+                    #    # TODO: This 'for loop' can be part of a 'get_schema()' function in the pandas2tfrecords file
+                    #    features['label/'+col] = dpl.get_feature(row)
 
-                # labels = segment[2]
-                # for col, row in labels.items():
-                #    # TODO: This 'for loop' can be part of a 'get_schema()' function in the pandas2tfrecords file
-                #    features['label/'+col] = dpl.get_feature(row)
-
-                tf_example = tf.train.Example(features=tf.train.Features(feature=features))
-                writer.write(tf_example.SerializeToString())
-
+                    tf_example = tf.train.Example(features=tf.train.Features(feature=features))
+                    writer.write(tf_example.SerializeToString())
 
 def main(_argv):
 

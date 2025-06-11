@@ -1,7 +1,7 @@
 import tensorflow as tf
 
 
-class autoencoder2D:
+class gapfilling_autoencoder2D:
     def __init__(
         self,
         inputs,
@@ -10,7 +10,7 @@ class autoencoder2D:
         dropouts=[0.4],
         **kwargs  # NOTE: allows us to ignore other keywords
     ):
-        super(autoencoder2D, self).__init__()
+        super(gapfilling_autoencoder2D, self).__init__()
         self.inputs = inputs
         self.aug_model = aug_model
         self.reg_model = reg_model

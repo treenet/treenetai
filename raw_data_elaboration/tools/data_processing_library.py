@@ -168,33 +168,42 @@ def _rescale_all(segment):
 
     min_vals = []
     differences = []
+    segment_normalized = []
     for e in list(segment):
         if e == 'hour':
-            segment.loc[:, e] = segment.loc[:, e].div(24)
-            min_val = 0
-            difference = 24
+            channel = segment[e].apply(pd.to_numeric).to_numpy()/24.0
+            min_val = 0.0
+            difference = 24.0
+        elif e == 'doy':
+            channel = segment[e].apply(pd.to_numeric).to_numpy()/365 # TODO: leap years are not considered. should not created a significant error. Try to improve.
+            min_val = 1.0
+            difference = 365.0
         elif e == 'month':
-            segment.loc[:, e] = segment.loc[:, e].div(12)
-            min_val = 0
-            difference = 12
+            channel = segment[e].apply(pd.to_numeric).to_numpy()/12.0
+            min_val = 0.0
+            difference = 12.0
         else:
-            min_val = segment[e].min()
-            max_val = segment[e].max()
+            channel = segment[e].apply(pd.to_numeric).to_numpy() 
+            # NOTE: very important! make sure to convert the pandas dataframe column into numeric type before you transform it into a numpy array.
+            # It could be that the values stored in the dataframe are numbers but in string format, so that when converted to nuympy array they become 
+            # something like decimal('10').
+            min_val = np.min(channel)
+            max_val = np.max(channel)
             difference = max_val - min_val
             if np.abs(difference) > 1e-4:
-                segment.loc[:, e] = _normalize(segment.loc[:, e], min_val, difference)
+                channel = _normalize(channel, min_val, difference)
             else:
                 # NOTE: if the min/max difference is very small the signal is shifted, without division. this also avoids problems of division by zero
                 #       in the _normalize() function.
-                segment.loc[:, e] = segment.loc[:, e] - min_val
-                difference = 1
+                channel = channel - min_val
+                difference = 1.0
+
+        segment_normalized.append(channel)
                 
-        min_vals.append(float(min_val))
-        differences.append(float(difference))
-
-    return np.asarray(segment.apply(pd.to_numeric)), np.asarray(min_vals), np.asarray(differences)
-
-
+        min_vals.append(min_val)
+        differences.append(difference)
+    
+    return np.array(segment_normalized).T, np.array(min_vals), np.array(differences)
 
 def _normalize(array, base, diff):
     array = (array - base) / diff

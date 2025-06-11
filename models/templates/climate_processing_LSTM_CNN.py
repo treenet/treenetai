@@ -22,7 +22,7 @@ subsequences in the window. The extracted features are then flattened and provid
 its own features before a final mapping to an activity is made.
 """
 
-class gapfilling_LSTM_CNN:
+class climate_processing_LSTM_CNN:
     def __init__(
         self,
         inputs,
@@ -31,8 +31,8 @@ class gapfilling_LSTM_CNN:
         dropouts=[0.5, 0.2],
         **kwargs  # NOTE: allows us to ignore other keywords
     ):
-        super(gapfilling_LSTM_CNN, self).__init__()
-        self.inputs = inputs
+        super(climate_processing_LSTM_CNN, self).__init__()
+        self.input_shape = inputs
         self.aug_model = aug_model
         self.reg_model = reg_model
         self.dropouts = dropouts
@@ -64,21 +64,29 @@ class gapfilling_LSTM_CNN:
         return "{}".format(self.__class__.__name__)
 
     def make_model(self):
-        x = self.inputs
+        #x = self.input_shape
+
+        # NOTE: optional augmentation
         if self.aug_model:
             x = self.aug_model(x)
 
-        n_timesteps = x.shape[1]
-        n_features = x.shape[2]
+        inputs = tf.keras.Input(shape=(720, 6))
+        x = inputs
+        n_timesteps = 720
+        n_features = 6
+        # NOTE: x.shape = ( , segment_length, channels)
+
         # TODO: find a more general way to introduce the two variables below.
         n_steps = 10
         n_length = 72
 
+        print('x: ', x.shape)
+
         x = tf.keras.layers.Reshape((n_steps, n_length, n_features))(x)
-        x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv1D(filters=512, kernel_size=9, activation='relu'),
+        x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv1D(filters=64, kernel_size=3, activation='relu'),
                                             input_shape=(n_length, n_features))(x)
         x = tf.keras.layers.TimeDistributed(tf.keras.layers.Dropout(0.3))(x)
-        x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv1D(filters=128, kernel_size=9, activation='relu'))(x)
+        x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv1D(filters=64, kernel_size=3, activation='relu'))(x)
         x = tf.keras.layers.TimeDistributed(tf.keras.layers.Dropout(0.3))(x)
         x = tf.keras.layers.TimeDistributed(tf.keras.layers.MaxPooling1D(pool_size=2))(x)
         x = tf.keras.layers.TimeDistributed(tf.keras.layers.Flatten())(x)
@@ -93,6 +101,7 @@ class gapfilling_LSTM_CNN:
             units=n_timesteps,
             return_sequences=True,
         )(x)
+
         x = tf.keras.layers.Dropout(self.dropouts[1])(x)
         x = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(n_timesteps))(x)
         x = tf.keras.layers.Flatten()(x)
@@ -104,7 +113,8 @@ class gapfilling_LSTM_CNN:
         #  This has to be solved or the regression model should not be used when comparing multi-channel series.
         # outputs = self.reg_model(x)
         outputs = x
-        model = tf.keras.Model(self.inputs, outputs)
+
+        model = tf.keras.Model(inputs, outputs)
 
         # TODO: fix the regularization
         # self._add_regularization(model, self.regularizer_function, self.weight_decay)

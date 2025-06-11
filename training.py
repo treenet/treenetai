@@ -1,3 +1,4 @@
+import comet_ml
 # NOTE: import comet_ml at the top of your file
 import datetime
 import glob
@@ -15,10 +16,11 @@ from utils.logger import ExperimentLogger
 from utils.utils import get_optimizer, setup_model_and_datasets
 import utils.utils as utils
 
-print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
-print('')
+#print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
+#print('')
 
-gpus = tf.config.list_physical_devices('GPU')
+#gpus = tf.config.list_physical_devices('GPU')
+gpus = 0
 if gpus:
     try:
         # NOTE: Currently, memory growth needs to be the same across GPUs
@@ -38,15 +40,15 @@ if gpus:
 
 def train(config):
     # NOTE: Create a tf keras MirroredStrategy for MultiGpuSupport, https://keras.io/guides/distributed_training/
-    multigpu_strategy = tf.distribute.MirroredStrategy()
-    with multigpu_strategy.scope():
-        model_instance, train_ds, val_ds = setup_model_and_datasets(config)
+    #multigpu_strategy = tf.distribute.MirroredStrategy()
+    #with multigpu_strategy.scope():
+    model_instance, train_ds, val_ds = setup_model_and_datasets(config)
     model = model_instance.make_model()
 
     # TODO: Add a check here for the experiment type. Make sure that the data loaded is the one for the particular
     #  experiment.
 
-    # NOTE: if existing load specific weights for model
+    # NOTE: if they exist, load specific weights for model
     if config.model_init_ckpt:
         print(f"Load weights from {config.model_init_ckpt}")
         model.load_weights(config.model_init_ckpt)
@@ -80,7 +82,7 @@ def train(config):
     config.cmd = cmd
 
     # NOTE: create checkpoint path in experiment directory and in config
-    checkpoint_path = os.path.join(model_dir, "checkpoint")
+    checkpoint_path = os.path.join(model_dir, "checkpoint.weights.h5")
     print(f"Store checkpoint at {checkpoint_path}")
     print(f"Set checkpoint path in config")
     config.ckpt = checkpoint_path

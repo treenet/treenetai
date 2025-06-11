@@ -43,6 +43,8 @@ treenet_timeseries_extended = {
 
 treenet_timeseries_short = {
     "data/timeseries_input": tf.io.FixedLenFeature([], tf.string),
-    "label/timeseries_label": tf.io.FixedLenFeature([], tf.string),
-    "other/metadata": tf.io.FixedLenFeature([], tf.string),
-}
+    "data/timeseries_label": tf.io.FixedLenFeature([], tf.string),
+    "other/min_values": tf.io.FixedLenFeature([], tf.string),
+    "other/differences": tf.io.FixedLenFeature([], tf.string),
+    "other/shape": tf.io.FixedLenFeature([2], tf.int64),
+    }
