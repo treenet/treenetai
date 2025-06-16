@@ -16,6 +16,9 @@ from utils.logger import ExperimentLogger
 from utils.utils import get_optimizer, setup_model_and_datasets
 import utils.utils as utils
 
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+
 #print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
 #print('')
 
@@ -117,13 +120,13 @@ def train(config):
     print('Saving sample of input data...')
     print('Batch size: ', config.train_batch)
     print('Total number of batches: ', len(list(train_ds.as_numpy_iterator())))
-    with open(model_dir + '/train_sample_input_' + str(config.file_id) + '.dat', 'a') as f:
+    with open(model_dir + '/train_sample_input_' + str(config.data_file_id) + '.dat', 'a') as f:
         print('First batch shape (Labels):', list(train_ds.as_numpy_iterator())[0][0].shape)
         for element in list(train_ds.as_numpy_iterator())[0][0]:  # Note iterates through the first batch
             np.savetxt(f, element)
             f.write('\n')
 
-    with open(model_dir + '/train_sample_label_' + str(config.file_id) + '.dat', 'a') as g:
+    with open(model_dir + '/train_sample_label_' + str(config.data_file_id) + '.dat', 'a') as g:
         print('First batch shape (Labels):', len(list(train_ds.as_numpy_iterator())))
         for element in list(train_ds.as_numpy_iterator())[0][1]:
             np.savetxt(g, element)

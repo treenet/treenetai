@@ -22,14 +22,17 @@ sys.path.append("..")
 
 def setup_model_and_datasets(config):
     ########################################################################
-    # NOTE: Create datasets
+    # SECTION: Create datasets
     ########################################################################
 
     # NOTE: Load data
     # TODO: Make sure that the file name is stored in the logs (also in CometAI)
-    # TODO: Make sure that the file_id in 2_train.sh corresponds to the one in 1_make_records.sh
-    train_fn = os.path.join(C.DATA_DIR, 'train_'+str(config.file_id)+'.tfrecords')
-    val_fn = os.path.join(C.DATA_DIR, 'validation_'+str(config.file_id)+'.tfrecords')
+    # TODO: Make sure that the data_file_id in 2_train.sh corresponds to the one in 1_make_records.sh
+    print('setting up model and datasets...')
+    print('')
+    print('path....  ', os.path.join(C.DATA_DIR, 'train_'+str(config.data_file_id)+'.tfrecords'))
+    train_fn = os.path.join(C.DATA_DIR, 'train_'+str(config.data_file_id)+'.tfrecords')
+    val_fn = os.path.join(C.DATA_DIR, 'validation_'+str(config.data_file_id)+'.tfrecords')
 
     train_ds = get_dataset(
         train_fn,
@@ -56,15 +59,20 @@ def setup_model_and_datasets(config):
         batch_size,
         segment_length,
         channels,
-    ) = get_dataset_dim(val_ds, bool(config.labelling_pattern))
+    ) = get_dataset_dim(val_ds, bool(config.labelling_pattern)) 
+    # TODO: 1) make sure the labelling_pattern option works. 2) add the shape of the output also.
+    
     config.input_segment_length = segment_length
     config.channels = channels
 
     ########################################################################
-    # NOTE: Get model and define callbacks
+    # SECTION: Get model and define callbacks
     ########################################################################
 
     inputs = tf.keras.Input(shape=(segment_length, channels))
+    
+    # TODO: finish implementing the shape of the output signal in the same way as the shape of the input signal
+    # outputs = tf.keras.Input(shape=(segment_length, channels))
 
     if config.aug_model_name:
         augmentation_model = get_model(model=config.aug_model_name, **vars(config))
@@ -87,7 +95,7 @@ def setup_model_and_datasets(config):
     )
 
     ########################################################################
-    # NOTE: Preprocess model
+    # SECTION: Preprocess model
     ########################################################################
 
     train_ds = preprocess_data(

@@ -270,7 +270,7 @@ def load_cosmo_grid(data_path : str, year : int, month : int, day : int) -> np.a
         cosmo_grid = cosmo_grid.transpose(2, 0, 1, 3)
     cosmo_grid[:, :, :, [3, 4]] -= 273.15  # Convert temperatures from Kelvins into Degrees celsius
     
-    return cosmo_grid[:, :, :, [3, 4]]  # NOTE: returns only the temperature and dwe temperature
+    return cosmo_grid[:, :, :, [3, 4]]  # NOTE: returns only the temperature and dew temperature
 
 def treenet_to_cosmo_grid_sites(data_path, site_coordinates):
     """Converts the TreeNet site ids to cosmo grid ids by matching the nearest coordinates.
@@ -307,25 +307,30 @@ def get_site_cosmo_clima(site_coordinates, year_start, year_end, data_path):
     clima_cosmo = {new_list: [] for new_list in site_coordinates.keys()}  
     # NOTE: initialize the dictionary where the key is the site_id and the value is a list of multivariate climate data
 
-    cosmo_ids = treenet_to_cosmo_grid_sites(data_path, site_coordinates)  # NOTE: for every TreeNet site, returns the closes COSMO grid id.
+    cosmo_ids = treenet_to_cosmo_grid_sites(data_path, site_coordinates)  # NOTE: for every TreeNet site, returns the closest COSMO grid id.
 
     # Get data from COSMO
     for year in range(year_start, year_end+1):
         dir_list = os.listdir(data_path + str(year))
-        for file in dir_list:
+        sorted_list = sorted(dir_list, key=lambda x: datetime.strptime(x.split('.')[0], "%Y%m%d")) # NOTE: This step is very important. It makes sure that the files are loaded in the correct order.
+        for file in sorted_list: # 
+            
             year = int(file[0:4])
             month = int(file[4:6])
             day = int(file[6:8])
+
+            # NOTE: load data for the particular day and for all the pixels
             cosmo_grid = load_cosmo_grid(data_path, year, month, day)  # NOTE: map containing the 8 quantities for each pixel for each hour
-            # Reshape COSMO forecasts to flatten across spatial dimensions
+            # NOTE: Reshape COSMO forecasts to flatten across spatial dimensions
             cosmo_flat = cosmo_grid.reshape(cosmo_grid.shape[0], -1, cosmo_grid.shape[3])  # NOTE: converts the 2D grid into a 1D array
-            # Use the min-distance index to extract COSMO variables for the desired location
+            # NOTE: Use the min-distance index to extract COSMO variables for the desired location
 
             for site_id in site_coordinates.keys():
-                cosmo_cell_climate = cosmo_flat[:, cosmo_ids[site_id], :]  # NOTE: numpy array with 24 rows and columns corresponding to the number of quantities chosen
+                min_index = cosmo_ids[site_id]
+                cosmo_cell_climate = cosmo_flat[:, min_index, :]  # NOTE: numpy array with 24 rows and columns corresponding to the number of quantities chosen
                 hour = 0
                 for row in cosmo_cell_climate:
-                # NOTE: iterate the list and add the timestamp and convert dew temperature to relative humidity
+                    # NOTE: iterate the list and add the timestamp and convert dew temperature to relative humidity
                     value = row.tolist()
                     clima_cosmo[site_id].append([pd.to_datetime(datetime(year,month,day,hour)), value[0], metpy.relative_humidity_from_dewpoint(value[0] * units.degC, value[1] * units.degC).to('percent').magnitude])
                     # NOTE: make sure to use pd.to_datetime() funciton so that the timestamp is in the correct type, i.e. dtype=datetime64[ns]

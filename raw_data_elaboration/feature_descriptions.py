@@ -46,5 +46,6 @@ treenet_timeseries_short = {
     "data/timeseries_label": tf.io.FixedLenFeature([], tf.string),
     "other/min_values": tf.io.FixedLenFeature([], tf.string),
     "other/differences": tf.io.FixedLenFeature([], tf.string),
-    "other/shape": tf.io.FixedLenFeature([2], tf.int64),
+    "other/shape_input": tf.io.FixedLenFeature([2], tf.int64),
+    "other/shape_output": tf.io.FixedLenFeature([2], tf.int64), # NOTE: The argument [2] implies that the element is an array with two entries.
     }

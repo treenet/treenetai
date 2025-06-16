@@ -16,10 +16,10 @@ def make_segments(df, length_in_days, time_resolution, normalization=True):
     # Input: data frame
     # Output: if normalization is True, then numpy array; if normalization is False, then pandas datafarame
     
-    # Creates segments of fixed length
-    # Removes time stamp from data frame
-    # Normalizes if True
-    # Converts data frame to numpy array through the _rescale function, i.e. only if normalization is True
+    # - Creates segments of fixed length
+    # - Removes time stamp from data frame
+    # - Normalizes if True
+    # - Converts data frame to numpy array through the _rescale function, i.e. only if normalization is True
 
     if df.shape[0] < 2 or df.shape[1] < 2:  # NOTE: makes sure that the dataset is not empty
         raise Exception('The data used for the experiment is not of the correct format. The data is either '
@@ -45,11 +45,11 @@ def make_segments(df, length_in_days, time_resolution, normalization=True):
                 segment = _rescale_all(segment)
             #else:
             #    segment_normalized = segment.apply(pd.to_numeric).to_numpy()
-                # note: the apply(pd.to_numeric) function makes sure that all the entries are of the same numeric type.
+                # NOTE: the apply(pd.to_numeric) function makes sure that all the entries are of the same numeric type.
                 #  When using data from the server, it is of the decimal type, which creates problems when the data is
                 #  saved in the TFrecords format.
 
-            # Note: At this point the dataframe has been converted to a numpy array
+            # NOTE: At this point the dataframe has been converted to a numpy array
             yield segment
             idx += segment_length
         else:
@@ -175,7 +175,7 @@ def _rescale_all(segment):
             min_val = 0.0
             difference = 24.0
         elif e == 'doy':
-            channel = segment[e].apply(pd.to_numeric).to_numpy()/365 # TODO: leap years are not considered. should not created a significant error. Try to improve.
+            channel = segment[e].apply(pd.to_numeric).to_numpy()/365.0 # TODO: leap years are not considered. should not created a significant error. Try to improve.
             min_val = 1.0
             difference = 365.0
         elif e == 'month':

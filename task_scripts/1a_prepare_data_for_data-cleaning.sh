@@ -38,7 +38,7 @@ clima_l2="/storage/lukovic/Data/FORWARDS/treenet/server_data/data_meteo_l2_dicti
 clima_lm="/storage/lukovic/Data/FORWARDS/treenet/server_data/data_meteo_lm_dictionary.pkl"
 cosmo_data_folder="/storage/lukovic/Data/FORWARDS/treenet/COSMO_FromCirrus/"
 
-year_start=2017
+year_start=2023
 year_end=2023
 
 output_folder="/home/lukovic/data/treenet/server_data/processed/"

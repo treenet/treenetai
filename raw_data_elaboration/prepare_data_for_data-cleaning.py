@@ -146,5 +146,5 @@ if __name__ == "__main__":
 
     with open(args.output_folder + "weather_data.pkl", 'wb') as f:
         pickle.dump(weather_data, f)
-    with open(args.output_folder + "weather_data_ids.pkl", 'wb') as f:
+    with open(args.output_folder + "weather_data_site_ids.pkl", 'wb') as f:
         pickle.dump(weather_data_identifiers, f)

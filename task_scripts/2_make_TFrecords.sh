@@ -2,7 +2,7 @@
 
 # NOTE:                 O P T I O N S   &   I N S T R U C T I O N S
 #-----------------------------------------------------------------------------------------------------------------------------#
-# file_id:              unique identifier for the file containing the tfrecord data
+# data_file_id:         unique identifier for the file containing the tfrecord data
 #-----------------------------------------------------------------------------------------------------------------------------#
 # file_type:            file format of the input files containing the data and metadata; .rda and .pkl for now.
 #-----------------------------------------------------------------------------------------------------------------------------#
@@ -67,17 +67,17 @@ metadataPath=/storage/lukovic/Data/FORWARDS/treenet/server_data/metadata_all.pkl
 tfrecordsDirPath=~/data/treenet/tfrecords
 #########################################
 
-# TODO: START
+# TODO:
 #  1) channels_to_fix option has to be changed so that it requires a description such as dendrometer,
 #  temperature, etc.. instead of numbers. Alternatively, the numbers could be kept so that each number, starting with
 #  zero corresponds to the channels described under "--data_channels".
 #  2) for now only one label can be used, specifically, the time series. The code has to be changed in order for the
 #  other features to be included as labels.
 #  3) The parameters should be stored in a file and loaded directly from it.
-# TODO: END
+# TODO END
 
 python3 ~/codes/treenetai/raw_data_elaboration/tfrecord_make.py \
-        --file_id 1 \
+        --data_file_id 1 \
         --file_type 'pkl' \
         --data_file_path $dataPath \
         --metadata_file_path $metadataPath \

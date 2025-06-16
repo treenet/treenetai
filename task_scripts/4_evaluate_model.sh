@@ -1,8 +1,10 @@
 #!/bin/bash
 
-export EXPERIMENTS=/Users/lukovic/Data/FORWARDS/TNT/experiments/
-export DATA=/Users/lukovic/Data/FORWARDS/TNT/tfrecords/
+export EXPERIMENTS=/home/lukovic/data/treenet/experiments/
+export DATA=/storage/lukovic/Data/FORWARDS/treenet/tfrecords/
 
-python evaluation.py 20240625-193439-CNN_LSTM_reconstruction 0 0
-python evaluation.py 20240626-012054-CNN_LSTM_reconstruction 0 0
-python evaluation.py 20240626-012111-CNN_LSTM_reconstruction 0 0
+ID=20250611-141849
+task=climate-processing
+
+python3 ~/codes/treenetai/evaluation.py $ID $task
+

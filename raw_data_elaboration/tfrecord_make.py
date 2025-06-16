@@ -15,7 +15,7 @@ class DatasetConfiguration(object):
                  segment_length,
                  time_resolution,
                  data_channels,
-                 file_id,
+                 data_file_id,
                  data_split,
                  random_state,
                  gap_size,
@@ -37,9 +37,9 @@ class DatasetConfiguration(object):
         self.segment_length = segment_length
         self.time_resolution = time_resolution
         self.data_channels = data_channels
-        self.file_id = file_id
-        self.train_path = self.tfrecords_path+'/train_'+str(file_id)+'.tfrecords'
-        self.test_path = self.tfrecords_path+'/validation_'+str(file_id)+'.tfrecords'
+        self.data_file_id = data_file_id
+        self.train_path = self.tfrecords_path+'/train_'+str(data_file_id)+'.tfrecords'
+        self.test_path = self.tfrecords_path+'/validation_'+str(data_file_id)+'.tfrecords'
         self.data_split = data_split
         self.random_state = random_state
         self.gap_size = gap_size
@@ -124,7 +124,7 @@ class DatasetConfiguration(object):
                 list_of_segments = dpl.make_segments(data, self.segment_length, self.time_resolution, True)
                 for el in list_of_segments:
                     input_array = el[0][:,[0,1,2,3,6,7]]
-                    label_array = el[0][:,[0,1,2,3,6,7]]
+                    label_array = el[0][:,[4,5]]
                     min_values = el[1]
                     differences = el[2]
                     segments.append( [ input_array, label_array, min_values, differences ] )
@@ -135,7 +135,7 @@ class DatasetConfiguration(object):
         elif self.experiment_type == 'nearest-neighbours': # TODO: complete this function or remove it
             df, metadata = dpl.nn_signal_preparation(df, metadata)  # TODO: Add the number of neighbours to the script.
 
-            # Todo: the following function should be accessed from dpl and not ts.
+            # TODO: the following function should be accessed from dpl and not ts.
             # segments = dpl.make_segments(df, metadata, self.segment_length, self.time_resolution, self.data_channels,
             #                              self.gap_size, self.gap_type, self.experiment_type, self.normalization,
             #                              self.channels_to_fix)
@@ -146,7 +146,7 @@ class DatasetConfiguration(object):
             df_with_permutations, new_meta_data = dpl.create_multi_dendro_channel(df, metadata, self.tree_species, self.trees,
                                                                            self.combination_samples,
                                                                            self.combination_samples_rand)
-            # note: the data (df_with_permutations) is a list and new_meta_data is a dictionary
+            # NOTE: the data (df_with_permutations) is a list and new_meta_data is a dictionary
 
             segments = []
             print('constructing segments of desired length from the permutation dataframe...')
@@ -172,7 +172,7 @@ class DatasetConfiguration(object):
         
         # NOTE: Write the processed data to a pickle file
         print('writing pkl file...')
-        with open(self.tfrecords_path+'/data_' + str(FLAGS.file_id) + '.pkl', 'wb') as f:
+        with open(self.tfrecords_path+'/data_' + str(FLAGS.data_file_id) + '.pkl', 'wb') as f:
             pk.dump(segments, f)  # Note: this warning will disapear as soon as the if statement is completed.
 
         return segments
@@ -184,9 +184,9 @@ class DatasetConfiguration(object):
         train, validation = train_test_split(segments, test_size=self.data_split, random_state=self.random_state)
 
         print('writing train and validation data to pkl')
-        with open(self.tfrecords_path+'/train_' + str(FLAGS.file_id) + '.pkl', 'wb') as f:
+        with open(self.tfrecords_path+'/train_' + str(FLAGS.data_file_id) + '.pkl', 'wb') as f:
             pk.dump(train, f)
-        with open(self.tfrecords_path+'/validation_' + str(FLAGS.file_id) + '.pkl', 'wb') as f:
+        with open(self.tfrecords_path+'/validation_' + str(FLAGS.data_file_id) + '.pkl', 'wb') as f:
             pk.dump(validation, f)
 
         train_set = [train, "train", self.train_path]
@@ -211,9 +211,10 @@ class DatasetConfiguration(object):
                         'data/timeseries_label': dpl.get_feature(dpl.serialize_array(label_array)),
                         'other/min_values': dpl.get_feature(dpl.serialize_array(minval)),
                         'other/differences': dpl.get_feature(dpl.serialize_array(diff)),
-                        'other/shape': tf.train.Feature(int64_list=tf.train.Int64List(value=input_array.shape)),
+                        'other/shape_input': tf.train.Feature(int64_list=tf.train.Int64List(value=input_array.shape)),
+                        'other/shape_output': tf.train.Feature(int64_list=tf.train.Int64List(value=label_array.shape)),
                         #'other/metadata': dpl.get_feature(dpl.serialize_array(segment[3])),
-                        # Note: For more details look at
+                        # NOTE: For more details look at
                         #  Ref: https://stackoverflow.com/questions/47861084/how-to-store-numpy-arrays-as-tfrecord
                     }
                     # labels = segment[2]
@@ -230,7 +231,7 @@ def main(_argv):
         'segment length': FLAGS.segment_length,
         'time resolution': FLAGS.time_resolution,
         'data channels': FLAGS.data_channels,
-        'file ID': FLAGS.file_id,
+        'file ID': FLAGS.data_file_id,
         'split ratio': FLAGS.data_split,
         'random state': FLAGS.random_state,
         'gap size': FLAGS.gap_size,
@@ -247,7 +248,7 @@ def main(_argv):
     }
 
     try:
-        file = open(FLAGS.tfrecords_dir_path+'/info_'+str(FLAGS.file_id)+'.txt', 'wt')
+        file = open(FLAGS.tfrecords_dir_path+'/info_'+str(FLAGS.data_file_id)+'.txt', 'wt')
         for a, b in configuration.items():
             file.write(str(a)+': '+str(b)+'\n')
         file.close()
@@ -262,7 +263,7 @@ def main(_argv):
                                        segment_length=FLAGS.segment_length,
                                        time_resolution=FLAGS.time_resolution,
                                        data_channels=FLAGS.data_channels,
-                                       file_id=FLAGS.file_id,
+                                       data_file_id=FLAGS.data_file_id,
                                        data_split=FLAGS.data_split,
                                        random_state=FLAGS.random_state,
                                        gap_size=FLAGS.gap_size,
@@ -298,7 +299,7 @@ if __name__ == "__main__":
                                  'time resolution of the time series')
     flags.DEFINE_list           ('data_channels', None,
                                  'select the measured features to be used')
-    flags.DEFINE_integer        ('file_id', np.random.randint(1000),
+    flags.DEFINE_integer        ('data_file_id', np.random.randint(1000),
                                  'identifier for each tfrecords file. details about the file contents can be found'
                                  'in the info file with the same ID number.')
     flags.DEFINE_float          ('data_split', 0.2,

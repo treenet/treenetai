@@ -34,9 +34,10 @@ def read_tfrecord(example, labelling_pattern):
     #  training and testing.
 
     # TITLE: make sure that the tensors are in the correct shape
-    shape = example['other/shape']
-    timeseries_input = tf.reshape(timeseries_input, shape)
-    timeseries_label = tf.reshape(timeseries_label, shape)
+    shape_input = example['other/shape_input']
+    shape_output = example['other/shape_output']
+    timeseries_input = tf.reshape(timeseries_input, shape_input)
+    timeseries_label = tf.reshape(timeseries_label, shape_output)
 
 
     return timeseries_input, timeseries_label
@@ -57,7 +58,7 @@ def load_dataset(filename, labelling_pattern=None, num_parallel_calls=None):
     #  the transformed elements, in the same order as they appeared in the input. map_func can be used to
     #  change both the values and the structure of a dataset's elements.
 
-    # Note: the code below might be useful if there are shape problems with tensors.
+    # NOTE: the code below might be useful if there are shape problems with tensors.
     # def get_data():
     #    for element in dataset:
     #        yield element
@@ -97,9 +98,9 @@ def get_dataset(
     return dataset
 
 
-def get_dataset_dim(ds, has_label):
-    # Todo: this function has to be adapted so that it can deal with any type of data structure.
-    if has_label:
+def get_dataset_dim(ds, has_label_pattern):
+    # TODO: this function has to be adapted so that it can deal with any type of data structure.
+    if has_label_pattern:
         timeseries_input, label = next(iter(ds))
     else:
         timeseries_input, label = next(iter(ds))

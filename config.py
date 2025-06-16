@@ -12,8 +12,10 @@ class Constants(object):
 
     class __Constants:
         def __init__(self):
-            self.DATA_DIR = os.environ["DATA"]
-            self.EXPERIMENT_DIR = os.environ["EXPERIMENTS"]
+            self.DATA_DIR = '/storage/lukovic/Data/FORWARDS/treenet/tfrecords'
+            self.EXPERIMENT_DIR = '/storage/lukovic/Data/FORWARDS/treenet/experiments'
+            #self.DATA_DIR = os.environ["DATA"]
+            #self.EXPERIMENT_DIR = os.environ["EXPERIMENTS"]
 
     instance = None
 
@@ -48,7 +50,7 @@ class Configuration:
         # sec: Data loading
 
         parser.add_argument(
-            "--file_id", type=int, default=''
+            "--data_file_id", type=int, default=''
         )
 
         # sec: Model configurations
