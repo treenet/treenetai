@@ -84,8 +84,9 @@ class climate_processing_LSTM_CNN:
         print('x: ', x.shape)
 
         x = tf.keras.layers.Reshape((n_steps, n_length, n_input_features))(x)
-        x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv1D(filters=64, kernel_size=3, activation='relu'),
-                                            input_shape=(n_length, n_input_features))(x)
+        x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv1D(filters=64, kernel_size=3, activation='relu'))(x)
+        #x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv1D(filters=64, kernel_size=3, activation='relu'),
+        #                                    input_shape=(n_length, n_input_features))(x) # TODO: it seems that the input_shape function is not necessary. if there are no errors, remove.
         x = tf.keras.layers.TimeDistributed(tf.keras.layers.Dropout(0.3))(x)
         x = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv1D(filters=64, kernel_size=3, activation='relu'))(x)
         x = tf.keras.layers.TimeDistributed(tf.keras.layers.Dropout(0.3))(x)
@@ -93,7 +94,7 @@ class climate_processing_LSTM_CNN:
         x = tf.keras.layers.TimeDistributed(tf.keras.layers.Flatten())(x)
         x = tf.keras.layers.Dropout(self.dropouts[0])(x)
         x = tf.keras.layers.LSTM(
-            input_shape=(n_timesteps, n_input_features),
+            #input_shape=(n_timesteps, n_input_features), # TODO: it seems that the input_shape function is not necessary. if there are no errors, remove.
             return_sequences=True,
             units=n_timesteps*2,
         )(x)

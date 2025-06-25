@@ -13,6 +13,7 @@ class DatasetConfiguration(object):
                  metadata_file_path,
                  tfrecords_dir_path,
                  segment_length,
+                 stride,
                  time_resolution,
                  data_channels,
                  data_file_id,
@@ -35,6 +36,7 @@ class DatasetConfiguration(object):
         self.data_path = data_file_path
         self.tfrecords_path = tfrecords_dir_path
         self.segment_length = segment_length
+        self.stride = stride
         self.time_resolution = time_resolution
         self.data_channels = data_channels
         self.data_file_id = data_file_id
@@ -93,7 +95,7 @@ class DatasetConfiguration(object):
             for series_id, data in df_with_extra_features.items():
                 
                 # TITLE 3. Create segments for training and testing (remove also the time stamp)
-                list_of_segments = dpl.make_segments(data, self.segment_length, self.time_resolution, False)  # NOTE: time serie is split into segments (without normalisation)
+                list_of_segments = dpl.make_segments(data, self.segment_length, self.stride, self.time_resolution, False)  # NOTE: time serie is split into segments (without normalisation)
                 
                 # TITLE 4. Add gaps to the segments, normalize and convert segment to numpy array (necessary for use with tensorflow)
                 for el in list_of_segments:
@@ -121,7 +123,7 @@ class DatasetConfiguration(object):
             for data in df:
                 data['hour'] = pd.to_datetime(data['ts']).dt.hour
                 data['doy'] = data.ts.dt.dayofyear
-                list_of_segments = dpl.make_segments(data, self.segment_length, self.time_resolution, True)
+                list_of_segments = dpl.make_segments(data, self.segment_length, self.stride, self.time_resolution, True)
                 for el in list_of_segments:
                     input_array = el[0][:,[0,1,2,3,6,7]]
                     label_array = el[0][:,[4,5]]
@@ -136,7 +138,7 @@ class DatasetConfiguration(object):
             df, metadata = dpl.nn_signal_preparation(df, metadata)  # TODO: Add the number of neighbours to the script.
 
             # TODO: the following function should be accessed from dpl and not ts.
-            # segments = dpl.make_segments(df, metadata, self.segment_length, self.time_resolution, self.data_channels,
+            # segments = dpl.make_segments(df, metadata, self.stride, self.segment_length, self.time_resolution, self.data_channels,
             #                              self.gap_size, self.gap_type, self.experiment_type, self.normalization,
             #                              self.channels_to_fix)
 
@@ -152,7 +154,7 @@ class DatasetConfiguration(object):
             print('constructing segments of desired length from the permutation dataframe...')
             # TODO: test this part of the function and confirm that it works.
             for value in df_with_permutations:
-                temp = dpl.make_segments(value, self.segment_length, self.time_resolution,
+                temp = dpl.make_segments(value, self.segment_length, self.stride, self.time_resolution,
                                                   self.normalization, self.trees)
                 
                 # Note: At this point the dataframe has been converted to a numpy array
@@ -229,6 +231,7 @@ def main(_argv):
 
     configuration = {
         'segment length': FLAGS.segment_length,
+        'stride length': FLAGS.stride,
         'time resolution': FLAGS.time_resolution,
         'data channels': FLAGS.data_channels,
         'file ID': FLAGS.data_file_id,
@@ -261,6 +264,7 @@ def main(_argv):
                                        metadata_file_path=FLAGS.metadata_file_path,
                                        tfrecords_dir_path=FLAGS.tfrecords_dir_path,
                                        segment_length=FLAGS.segment_length,
+                                       stride=FLAGS.stride,
                                        time_resolution=FLAGS.time_resolution,
                                        data_channels=FLAGS.data_channels,
                                        data_file_id=FLAGS.data_file_id,
@@ -295,6 +299,8 @@ if __name__ == "__main__":
                                  'tfrecords directory')
     flags.DEFINE_integer        ('segment_length', 30,
                                  'length of the segments into which the time series should be divided')
+    flags.DEFINE_integer        ('stride', 24,
+                                 'stride length for creating the segments. if stride=segment_length, then there is no overlap')
     flags.DEFINE_integer        ('time_resolution', 1,
                                  'time resolution of the time series')
     flags.DEFINE_list           ('data_channels', None,

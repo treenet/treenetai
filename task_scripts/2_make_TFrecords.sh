@@ -16,6 +16,9 @@
 #-----------------------------------------------------------------------------------------------------------------------------#
 # segment_length:       enter the number of days for the segment lengths
 #-----------------------------------------------------------------------------------------------------------------------------#
+# stride:               the number of hours to advance after every segment is determined. Smaller number means more segments.
+#                       stride length for creating the segments. if stride=segment_length, then there is no overlap.
+#-----------------------------------------------------------------------------------------------------------------------------#
 # time_resolution:      this is the time resolution of the input data. Enter the factor to multiply the entire segment length.
 #                       e.g. The time resolution of the raw treenet data is 10min, therefore it would require 6 cells in the 
 #                       vector to accomodate 1 hour. If the resolution of the raw data is 1hr, then one cell is enough.
@@ -62,7 +65,7 @@
 #########################################
 # E N T E R the correct paths below
 #########################################
-dataPath=/storage/lukovic/Data/FORWARDS/treenet/server_data/processed/weather_data.pkl
+dataPath=/storage/lukovic/Data/FORWARDS/treenet/server_data/processed/weather_data_2017-2022.pkl
 metadataPath=/storage/lukovic/Data/FORWARDS/treenet/server_data/metadata_all.pkl
 tfrecordsDirPath=~/data/treenet/tfrecords
 #########################################
@@ -84,6 +87,7 @@ python3 ~/codes/treenetai/raw_data_elaboration/tfrecord_make.py \
         --tfrecords_dir_path $tfrecordsDirPath \
         --species 'all' \
         --segment_length 30 \
+        --stride 24 \
         --time_resolution 1 \
         --data_channels '['ts','stem_radius','temp','rh','vpd','rad','swp','total_precip']' \
         --experiment_type 'climate-processing' \

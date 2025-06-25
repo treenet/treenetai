@@ -16,5 +16,5 @@ python3 ~/codes/treenetai/training.py \
   --optimizer 'adam' \
   --verbose 2 \
   --lr 0.00001 \
-  --epochs 10 \
+  --epochs 50 \
   --data_file_id 1   # TODO: construct a test that makes sure the correct input data file is used

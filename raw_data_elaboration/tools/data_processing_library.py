@@ -12,7 +12,7 @@ import random
 # Sec: Segmentation
 # Sec: ----------------------------------------
 
-def make_segments(df, length_in_days, time_resolution, normalization=True):
+def make_segments(df, length_in_days, stride, time_resolution, normalization=True):
     # Input: data frame
     # Output: if normalization is True, then numpy array; if normalization is False, then pandas datafarame
     
@@ -51,7 +51,7 @@ def make_segments(df, length_in_days, time_resolution, normalization=True):
 
             # NOTE: At this point the dataframe has been converted to a numpy array
             yield segment
-            idx += segment_length
+            idx += stride
         else:
             idx += 1
 
@@ -163,7 +163,7 @@ def _rescale_all(segment):
     #  shifted so that the minimum value is zero.
 
     if len(segment.shape) != 2:
-        raise Exception(f'The dimension of the segment array should be 2. '
+        raise Exception(f'_rescale_all() in data_processing_library.py The dimension of the segment array should be 2. '
                         f'In this case the shape of the array is ' + str(segment.shape))
 
     min_vals = []
