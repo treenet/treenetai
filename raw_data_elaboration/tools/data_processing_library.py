@@ -12,7 +12,7 @@ import random
 # Sec: Segmentation
 # Sec: ----------------------------------------
 
-def make_segments(df, length_in_days, stride, time_resolution, normalization=True):
+def make_segments(df, length_in_days, stride, time_resolution, normalization=True, time_stamp=False):
     # Input: data frame
     # Output: if normalization is True, then numpy array; if normalization is False, then pandas datafarame
     
@@ -27,6 +27,7 @@ def make_segments(df, length_in_days, stride, time_resolution, normalization=Tru
 
     df = df.dropna()  # Note: remove all missing data from the dataframe
     segment_length = length_in_days * 24 * time_resolution  # Note: converts the segment length from days to time-samps
+    stride_length = stride *24 * time_resolution
     start_time = 0
 
     idx = 0
@@ -39,19 +40,24 @@ def make_segments(df, length_in_days, stride, time_resolution, normalization=Tru
             # NOTE each segment has the shape [time steps, number of features/channels].
             #  This should be considered when creating an input for a machine learning model.
 
-            segment = segment.drop(['ts'], axis=1)  # Note: removes the time-stamp
+            if time_stamp:
+                ts = segment.ts
+            segment = segment.drop(['ts'], axis=1)  # NOTE: removes the time-stamp
 
             if normalization:
                 segment = _rescale_all(segment)
             #else:
-            #    segment_normalized = segment.apply(pd.to_numeric).to_numpy()
+            #segment_normalized = segment.apply(pd.to_numeric).to_numpy()
                 # NOTE: the apply(pd.to_numeric) function makes sure that all the entries are of the same numeric type.
                 #  When using data from the server, it is of the decimal type, which creates problems when the data is
                 #  saved in the TFrecords format.
 
             # NOTE: At this point the dataframe has been converted to a numpy array
-            yield segment
-            idx += stride
+            if time_stamp:
+                yield segment, ts
+            else:
+                yield segment
+            idx += stride_length
         else:
             idx += 1
 

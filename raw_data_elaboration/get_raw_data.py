@@ -58,8 +58,7 @@ def server_data_dendrometer(database, data_path, credentials_path):
                               credentials.get('port'), 
                               credentials.get('dbname') )
     
-    # query = "SELECT series_id,ts,value FROM " + database + " WHERE series_id=%s ORDER BY ts" 
-    query = "SELECT * FROM " + database + " WHERE series_id=%s ORDER BY ts LIMIT 10" 
+    query = "SELECT series_id,ts,value FROM " + database + " WHERE series_id=%s ORDER BY ts" 
     
     for row in meta.iterrows():
         if row[1].variable_name == "tree stem radius change":  

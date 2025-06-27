@@ -10,15 +10,15 @@ import tools.data_organisation as do
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("meta_path", type=str)
-    parser.add_argument("meta_temperature_l1_path", type=str)
-    parser.add_argument("meta_humidity_l1_path", type=str)
+    parser.add_argument("meta_path", type=str)                      # NOTE: complete metadata
+    parser.add_argument("meta_temperature_l1_path", type=str)       # NOTE: metadata for the L1 temperature signal
+    parser.add_argument("meta_humidity_l1_path", type=str)          # NOTE: metadata for the L1 hmidity signal
 
-    parser.add_argument("temperature_l1_path", type=str)
-    parser.add_argument("humidity_l1_path", type=str)
-    parser.add_argument("clima_l2_path", type=str)
-    parser.add_argument("clima_lm_path", type=str)
-    parser.add_argument("cosmo_data_path", type=str)
+    parser.add_argument("temperature_l1_path", type=str)            # NOTE: L1 temperature signal - part of input data
+    parser.add_argument("humidity_l1_path", type=str)               # NOTE: L1 humidity signal - part of input data
+    parser.add_argument("clima_l2_path", type=str)                  # NOTE: L2 temperature signal - ground truth (label) data
+    parser.add_argument("clima_lm_path", type=str)                  # NOTE: LM humidity signal - ground truth (label) data
+    parser.add_argument("cosmo_data_path", type=str)                # NOTE: CSOSMO temperature and humidity - part of the input data
 
     parser.add_argument("year_start", type=int)
     parser.add_argument("year_end", type=int)
@@ -107,16 +107,19 @@ if __name__ == "__main__":
     # NOTE: get sites that have all the necessary data
     sites = list(set(temperature_sensors.keys()) & set(humidity_sensors.keys()) & set(clima_lm.keys()) & set(clima_l2.keys()))
 
+    # NOTE: get the correspondig site coordinates
     site_coordinates = do.get_site_coordinates(sites, metadata)
+
+    # NOTE: get the COSMO data - part of the input 
     clima_cosmo = do.get_site_cosmo_clima(site_coordinates, year_start, year_end, args.cosmo_data_path)
 
     weather_data = []
     weather_data_identifiers = []
     for site in sites:
-        for temp_id in temperature_sensors[site]:
-            for humidity_id in humidity_sensors[site]:
+        for temp_id in temperature_sensors[site]:  # NOTE: selects a thermometer at the site
+            for humidity_id in humidity_sensors[site]:  # NOTE: pairs each hygrometer to every thermometer at the site
                 df_temp_raw = temperature_l1[temp_id][['ts', 'value']]  # NOTE: raw temperature
-                df_temp_raw.columns = ['ts', 'temp_raw']
+                df_temp_raw.columns = ['ts', 'temp_raw']  # NOTE: rename columns
                 df_rh_raw = humidity_l1[humidity_id][['ts', 'value']]  # NOTE: raw relative humidity
                 df_rh_raw.columns = ['ts', 'rh_raw']
                 df_temp_processed = clima_l2[site][['ts', 'temp']]  # NOTE: curated temperature
@@ -139,12 +142,19 @@ if __name__ == "__main__":
                 ground_truth_df = pd.merge(df_temp_processed, df_rh_processed, how='left', on='ts')
                 # NOTE: Then merge all the data into a single data frame
                 treenet_df = pd.merge(input_df, ground_truth_df, how='right', on='ts')
-                total_df = pd.merge(clima_cosmo[site], treenet_df, how='inner', on='ts')
+                # NOTE: Finally, add the COSMO data
+                total_df = pd.merge(clima_cosmo[site], treenet_df, how='inner', on='ts')  # TODO: the merging is done using 'inner' assuming that the COSMO data has no gaps. Otherwise, there will be errors later. 
                 
                 weather_data.append(total_df)
                 weather_data_identifiers.append([site, temp_id, humidity_id])  # NOTE: this is the corresponding list that contains the site and series IDs
 
+    # NOTE: the main ouptut of this script is the list of Pandas databases conaining the temperature and humidity, where all the instrument signals from each site were cupled pairwise. 
+    # Therefore, if site 1 has 2 temperature signals and 3 hygrometer signals, then there are 6 databases produced. 
+    
     with open(args.output_folder + "weather_data.pkl", 'wb') as f:
         pickle.dump(weather_data, f)
+
+    # NOTE: convert the list to a Pandas dataframe
+    id_df = pd.DataFrame(weather_data_identifiers, columns = ['site ID', 'thermometer ID', 'hygrometer ID'])
     with open(args.output_folder + "weather_data_site_ids.pkl", 'wb') as f:
-        pickle.dump(weather_data_identifiers, f)
+        pickle.dump(id_df, f)
