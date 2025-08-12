@@ -151,8 +151,11 @@ def server_data(database, data_path, credentials_path):
 
     temperature = {}
     humidity = {}
+    swp = {}
     temperature_meta = []
     humidity_meta = []
+    swp_meta = []
+
     meta = server.get_metadata( credentials.get('user'), 
                                 credentials.get('password'), 
                                 credentials.get('host'), 
@@ -170,7 +173,7 @@ def server_data(database, data_path, credentials_path):
     
     for row in meta.iterrows():
         variable = row[1].variable_name
-        if variable == "air temperature" or variable == "relative humidity":  
+        if variable == "air temperature" or variable == "relative humidity" or variable == "soil water potential":  
             print('series id: ' + str(row[1].series_id))
             series_id = row[1].series_id
             value = (series_id,)
@@ -187,9 +190,12 @@ def server_data(database, data_path, credentials_path):
                 if variable == "air temperature":
                     temperature[series_id] = temp
                     temperature_meta.append(row[1])
-                else:
+                elif variable == "relative humidity":
                     humidity[series_id] = temp
                     humidity_meta.append(row[1])
+                else:
+                    swp[series_id] = temp
+                    swp_meta.append(row[1])
             else:
                 write_text(data_path+"/screen_" + database + ".log", 'series id: ' + str(series_id) + ' -> empty or less than 10 rows')
 
@@ -197,6 +203,8 @@ def server_data(database, data_path, credentials_path):
         pickle.dump(temperature, f)
     with open(data_path + "/" + database + "_humidity_dictionary.pkl", 'wb') as f:
         pickle.dump(humidity, f)
+    with open(data_path + "/" + database + "_swp_dictionary.pkl", 'wb') as f:
+        pickle.dump(swp, f)
 
     temperature_meta = pd.DataFrame(temperature_meta)
     with open(data_path+"/metadata_" + database + "_temperature.pkl", 'wb') as f:
@@ -205,6 +213,10 @@ def server_data(database, data_path, credentials_path):
     humidity_meta = pd.DataFrame(humidity_meta)
     with open(data_path+"/metadata_" + database + "_humidity.pkl", 'wb') as f:
         pickle.dump(humidity_meta, f)
+
+    swp_meta = pd.DataFrame(swp_meta)
+    with open(data_path+"/metadata_" + database + "_swp.pkl", 'wb') as f:
+        pickle.dump(swp_meta, f)
 
     write_text(data_path+"/screen_" + database + ".log", "Done...")
 

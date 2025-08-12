@@ -10,7 +10,7 @@
 credentials_path=~/codes/treenetai/raw_data_elaboration/tools/config_server.yml
 path=~/data/treenet/server_data
 
-for database in data_meteo_l2 data_meteo_lm; do
+for database in data_all_l1; do
     python3 ~/codes/treenetai/raw_data_elaboration/get_raw_data.py $database $path $credentials_path
     mv /home/lukovic/data/treenet/server_data/* /storage/lukovic/Data/FORWARDS/treenet/server_data
 done
