@@ -7,12 +7,173 @@ import itertools
 import tensorflow as tf
 import random
 
+#################### !!!!! W A R N I N G !!!!! ##################################
+# This library is old and should be removed at some point. Its functions have been moved
+# to the following files: tfrecords.py, signal_reconstruction.py, gap-filling.py and segmentation.py
+# ONLY FOR REFERENCE! Don't modify or apply.
+
+
 
 # Sec: ----------------------------------------
-# Sec: Segmentation
+# Sec: Segmentation NEW
 # Sec: ----------------------------------------
 
-def make_segments(df, length_in_days, stride, time_resolution, normalization=True):
+def make_segments(df, length_in_days, stride, time_resolution):
+    """
+    Input: pandas data frame
+    Output: pandas data farame
+
+    # - Creates segments of fixed length
+    # - Removes time stamp from data frame
+    # - Normalizes if True
+    # - Converts data frame to numpy array through the _rescale function, i.e. only if normalization is True
+    """
+
+    if df.shape[0] < 2 or df.shape[1] < 2:  # NOTE: makes sure that the dataset is not empty
+        raise Exception('The data used for the experiment is not of the correct format. The data is either '
+                        'empty or there is only one time series channel.')
+
+    df = df.dropna()  # Note: remove all missing data from the dataframe
+    segment_length = length_in_days * 24 * time_resolution  # Note: converts the segment length from days to time-samps
+    stride_length = stride * 24 * time_resolution
+
+    idx = 0
+    max_length = len(df)
+
+    segments = []
+    while (idx + segment_length) < max_length:
+        if (df.index[segment_length + idx] - df.index[idx] == segment_length):
+            segments.append(df.iloc[idx:idx + segment_length])
+            idx += stride_length
+        else:
+            idx += 1
+    return segments
+
+def add_gaps(segment, gap_size_days, gap_type, channels, time_resolution):
+    """
+    Adds gaps to segments of a time series
+    """
+    # TODO (gap_type): add the possibility of sampling gap sizes from a uniform and an exponential distribution
+
+    segment_modified = segment.copy()
+    gap_size = gap_size_days * 24 * time_resolution
+
+    for channel in channels: # NOTE: 'for' loop over the requested channels
+        start_index = np.random.randint(len(segment) - gap_size)
+        # NOTE: selects a random point on the array to start with the gap
+        if gap_type == 'constant':
+            end_index = start_index + gap_size
+        elif gap_type == 'uniform':
+            end_index = start_index + gap_size  # TODO: not complete; gap size should be random
+        elif gap_type == 'exponential':
+            end_index = start_index + gap_size  # TODO: not complete; gap size should be random
+        else:
+            raise Exception(f'The distribution of gaps is unknown.')
+
+        index_labels = segment_modified.index[start_index:end_index]
+        segment_modified.loc[index_labels, channel] = np.nan
+
+    return segment_modified
+
+def normalize_dataframe(df):
+    """
+    Input: Pandas data frame with multiple columns (not necessarily numeric)
+    Output: Pandas data frame where the values of the numeric columns are normalized according to column.
+    """
+    # TODO (Important!!) Maybe it is better to normalize the entire time series and not the segments separately.
+    #  If we consider channels of a segment that have a constant value in that time period but that nevertheless
+    #  change over a longer time period, then giving them all a value of 0.5 does not really make sense.
+    # TODO consider adding the case where the signal is not normalized but is, nevertheless,
+    #  shifted so that the minimum value is zero.
+
+    if len(df.shape) != 2:
+        raise Exception(f'_rescale_all() in data_processing_library.py The dimension of the segment array should be 2. '
+                        f'In this case the shape of the array is ' + str(df.shape))
+
+    numeric_columns = df.select_dtypes(include='number').columns
+    
+    minima = {}
+    differences = {}
+    df_normalized = df.copy()
+
+    for e in numeric_columns:
+        if e == 'hour':
+            df_normalized[e] = df[e]/24.0
+            minima[e] = 0.0
+            differences[e] = 24.0
+        elif e == 'doy':
+            df_normalized[e] = df[e]/365.0 # TODO: leap years are not considered. should not create a significant error. Try to improve.
+            minima[e] = 1.0
+            differences[e] = 365.0
+        elif e == 'month':
+            df_normalized[e] = df[e]/12.0
+            minima[e] = 0.0
+            differences[e] = 12.0
+        else:
+            min_val = df[e].min(skipna=True)
+            max_val = df[e].max(skipna=True)
+            minima[e] = min_val
+            if pd.isna(min_val) or pd.isna(max_val): # If True, then all the values in the column are NaNs
+                df_normalized[e] = df[e] # return the original column values, i.e. leave the NaNs.
+                differences[e] = pd.NA
+            else:
+                difference = max_val - min_val
+                if np.abs(difference) > 1e-4:
+                    # NOTE: The Pandas library functions are aware of the NaNs when performing arithmetic functions. Therefore, it is safe to keep 
+                    #   them in the dataframe. It is not necessary to do anything about it. 
+                    df_normalized[e] = (df[e] - min_val)/difference
+                    differences[e] = difference
+                else:
+                    # NOTE: if the min/max difference is very small the signal is shifted, without division. this also avoids problems of division by zero
+                    #       in the _normalize() function.
+                    df_normalized[e] = df[e] - min_val
+                    differences[e] = 1.0
+
+    return df_normalized, minima, differences
+
+def weighted_random_subset(channels):
+    """
+    Input: list of channels/physical properties/column names to choose from
+    Output: list of randomly selected channels
+
+    The number of channels that is returned by the function is greater than one. 
+    The channel 'GRO' is always returned. The other channels are returned according
+    to their probability weights. The number of channels that is restored is also 
+    a random number. All these parameters are defined within the function. In order
+    to change them, they have to be changed inside the function.
+    """
+    subset = ['GRO']
+    remaining = channels[1:]
+
+    # Generate weights for number of additional elements
+    max_len = len(remaining)
+    possible_lengths = list(range(0, max_len + 1))  # 0 to max_len
+
+    # Example: weight = 5 for length=2, lower weights for others
+    length_weights = [1 if i != 1 else 5 for i in possible_lengths]
+
+    # Choose number of additional elements
+    num_to_select = random.choices(possible_lengths, weights=length_weights, k=1)[0]
+
+    # Priority weights based on position (higher priority = higher weight)
+    priority_weights = list(reversed(range(1, len(remaining) + 1)))
+
+    # Sample without replacement using priority weights
+    selected = random.choices(remaining, weights=priority_weights, k=num_to_select)
+
+    # Remove duplicates
+    subset += list(set(selected))
+
+    return subset
+
+# Sec: END ------------------------------------
+
+
+# Sec: -------------------------------------------------------------------------------------
+# Sec: Segmentation OLD - to be removed eventually - they are intended for numpy (np) arrays
+# Sec: -------------------------------------------------------------------------------------
+
+def make_segments_np(df, length_in_days, stride, time_resolution, normalization=True):
     # Input: data frame
     # Output: if normalization is True, then numpy array; if normalization is False, then pandas datafarame
     
@@ -77,7 +238,7 @@ def add_features(df, metadata, time = True, rest = False):
     return df
 
 
-def add_gaps(segment, segment_length, gap_size, gap_type, channels_to_fix, normalization=True):
+def add_gaps_np(segment, segment_length, gap_size, gap_type, channels_to_fix, normalization=True):
     # Adds gaps to segments of a time series
     # Normalizes the segment if True
 
@@ -108,10 +269,10 @@ def add_gaps(segment, segment_length, gap_size, gap_type, channels_to_fix, norma
             array[start_index:end_index] = -1  # TODO: for now I am using -1 to repreent a missing value. There might be a better way.
 
             if normalization:
-                # NOTE: It is very importatn that the segment is normalized after the gap has been created. This corresponds to the realistic situation when we 
-                # have to gap-fill a time series. In that case, there is a gap and we don't have the ground truth. However, we still have to normalize. So the only
-                # way we can do that is to ignore the missing values. Of couse, this means that the ground truth will have a different normalization result if we include
-                # also the data that should be missing. We are precisely tring to train the algorithm to infer this change in normalization. 
+                # NOTE: It is very importatnt that the segment is normalized after the gap has been created. This corresponds to the realistic situation when we 
+                #   have to gap-fill a time series. In that case, there is a gap and we don't have the ground truth. However, we still have to normalize. So the only
+                #   way we can do that is to ignore the missing values. Of couse, this means that the ground truth will have a different normalization result if we include
+                #   also the data that should be missing. We are precisely tring to train the algorithm to infer this change in normalization. 
                 array_temp = np.concatenate((array[:start_index], array[end_index:]))
                 array_temp, base, difference = _rescale_channel(array_temp, el)
                 array[:start_index] = array_temp[:start_index]
@@ -153,6 +314,10 @@ def _rescale_channel(segment, channel):
     return segment, min_val, difference
 
 def _rescale_all(segment):
+    """
+    Input: Pandas data frame with multiple numeric columns
+    Output: Numpy array with multiple numeric columns where the values are normalized according to column.
+    """
     # TODO (Important!!) Maybe it is better to normalize the entire time series and not the segments separately.
     #  If we consider channels of a segment that have a constant value in that time period but that nevertheless
     #  change over a longer time period, then giving them all a value of 0.5 does not really make sense.
@@ -177,7 +342,7 @@ def _rescale_all(segment):
             min_val = 0.0
             difference = 24.0
         elif e == 'doy':
-            channel = segment[e].apply(pd.to_numeric).to_numpy()/365.0 # TODO: leap years are not considered. should not created a significant error. Try to improve.
+            channel = segment[e].apply(pd.to_numeric).to_numpy()/365.0 # TODO: leap years are not considered. should not create a significant error. Try to improve.
             min_val = 1.0
             difference = 365.0
         elif e == 'month':
@@ -187,8 +352,8 @@ def _rescale_all(segment):
         else:
             channel = segment[e].apply(pd.to_numeric).to_numpy() 
             # NOTE: very important! make sure to convert the pandas dataframe column into numeric type before you transform it into a numpy array.
-            # It could be that the values stored in the dataframe are numbers but in string format, so that when converted to nuympy array they become 
-            # something like decimal('10').
+            #   It could be that the values stored in the dataframe are numbers but in string format, so that when converted to nuympy array they become 
+            #   something like decimal('10').
             min_val = np.min(channel)
             max_val = np.max(channel)
             difference = max_val - min_val
@@ -227,18 +392,18 @@ def create_multi_dendro_channel(df, meta, species, trees=3, permutation_samples=
     print('')
     series_ids_temp = list(meta[meta.tree_species == species[0]].series_id)[0:20]
     print('Number of tree signals considered: ', len(series_ids_temp))
-    # Todo: there should be a loop here in case more than one species is used. There should also be a check for the
+    # TODO: there should be a loop here in case more than one species is used. There should also be a check for the
     #  'all' command in the script 1_make_records.sh (if all then ...).
-    # note: series_ids is a list of unique tree signal ids that correspond to dendrometer signals of trees of the same
+    # NOTE: series_ids is a list of unique tree signal ids that correspond to dendrometer signals of trees of the same
     #  species. The reason it is temporary is because some of the entries downloaded from the database might be empty,
     #  without data. This is checked in the _list_to_dictionary function, which provides the final series_id list.
-    # todo: so far we are only using one tree species so there is only one list. This has to be changed when more tree
+    # TODO: so far we are only using one tree species so there is only one list. This has to be changed when more tree
     #  species are used.
 
     data, series_ids = _list_to_dictionary(df, series_ids_temp, ['ts', 'value'])
-    # note: creates a dictionary such that the key corresponds to the id of the signal and value of the dictionary
+    # NOTE: creates a dictionary such that the key corresponds to the id of the signal and value of the dictionary
     #  corresponds to the signal itself.
-    # note: data is the dictionary and series_ids is the new (updated) id list.
+    # NOTE: data is the dictionary and series_ids is the new (updated) id list.
 
     for key, value in data.items():
         # note: makes sure that the column names containing the signal are different. The timestamp column name remains
@@ -255,11 +420,11 @@ def create_multi_dendro_channel(df, meta, species, trees=3, permutation_samples=
     #  should finish here.
 
     permutation_list = _get_permutation_list(series_ids, trees, permutation_samples, meta, combination_samples_rand)
-    # Note: the permutation_list is a dictionary that contains the permutations of ids of the input dendrometer signals
+    # NOTE: the permutation_list is a dictionary that contains the permutations of ids of the input dendrometer signals
     #  for each key, which corresponds to the id of the label signal.
 
     combined_signals = _combine_signals(data, permutation_list)
-    # Note: the function _combine_signals puts together the input dendrometer signals and the label signal and then
+    # NOTE: the function _combine_signals puts together the input dendrometer signals and the label signal and then
     #  extracts the timestaps for which they all overlap. It returns all the time series together in a single dataframe.
     #  combined_signals is a dictionary, where the key is the series id. Each key corresponds to a list of dataframes.
     #  Each dataframe of the list contains also the time series that corresponds to the key=series_id.
@@ -270,7 +435,7 @@ def create_multi_dendro_channel(df, meta, species, trees=3, permutation_samples=
     #                'tree_gro_med_day', 'tree_gro_med_hr', 'tree_timing_gro_week_max', 'tree_timing_gro_hour_max',
     #                'tree_grohours_med', 'site_xcor', 'site_ycor', 'site_altitude', 'site_annual_temp',
     #                'site_annual_precip']]
-    # todo: this selection is to avoid non-numerical arguments. They also have to be included with one-hot encoding.
+    # TODO: this selection is to avoid non-numerical arguments. They also have to be included with one-hot encoding.
 
     newmeta = meta[['series_id']]
 
