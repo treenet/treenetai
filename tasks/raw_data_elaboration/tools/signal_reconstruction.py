@@ -55,8 +55,8 @@ def create_multi_dendro_channel(df, meta, species, number_of_trees=3, input_sets
     #  for each key, which corresponds to the id of the label signal. If 'permutations' is false, then a more restrictive combination of
     #  input signals is considered. See the function for details. 
 
-    combined_signals = _combine_signals(data, permutation_list)
-    # NOTE: the function _combine_signals puts together the input dendrometer signals and the label signal and then
+    combined_signals = _merge_signals(data, permutation_list)
+    # NOTE: the function _merge_signals puts together the input dendrometer signals and the label signal and then
     #  extracts the timestaps for which they all overlap. It returns all the time series together in a single dataframe.
     #  combined_signals is a dictionary, where the key is the series id. Each key corresponds to a list of dataframes.
     #  Each dataframe of the list contains also the time series that corresponds to the key=series_id.
@@ -69,14 +69,22 @@ def create_multi_dendro_channel(df, meta, species, number_of_trees=3, input_sets
     #                'site_annual_precip']]
     # TODO: this selection is to avoid non-numerical arguments. They also have to be included with one-hot encoding.
 
+    ############################## #TODO ######################################################
+    # NOTE: METADATA addition
+    # TODO: The addition of metadata is done for now in the Python notebook. Once it is ready, the code should be moved here in 
+    # the form of functions
+
     newmeta = meta[['series_id']]
 
     combined_signals_with_metadata = _add_metadata_features(combined_signals, newmeta)
     # NOTE: attaches the metadata values to the time series, also in the form of a constant time series for each
     #  metadata feature.
 
-    return _dictionary_to_list(combined_signals_with_metadata), newmeta
+    #return _dictionary_to_list(combined_signals_with_metadata), newmeta
     # note: returns a dictionary where the key is the series_id and the value is the dataframe
+    ##########################################################################################
+
+    return combined_signals_with_metadata
 
 
 def _add_metadata_features(signals, newmeta):
@@ -100,7 +108,7 @@ def _add_metadata_features(signals, newmeta):
     return signals
 
 
-def _combine_signals(data, permutation_list):
+def _merge_signals(data, permutation_list):
     all_signals = dict()
     for key, permuations in permutation_list.items():
         for sequence in permuations:  # note: 'permutations' contains a list of all permutations related to 'key'
@@ -112,7 +120,7 @@ def _combine_signals(data, permutation_list):
             if len(signals) > 0:
                 all_signals.setdefault(key, []).append(signals)
 
-    # Todo: below is an old for loop. Same as above but using 'for e in series_ids'
+    # TODO: below is an old for loop. Same as above but using 'for e in series_ids'
     # for e in series_ids:  # note: e is a list of series_id values
     #    for ee in permutation_list[e]:
     #        temp_list = []
@@ -124,6 +132,72 @@ def _combine_signals(data, permutation_list):
     #            all_signals[e] = signals
 
     return all_signals
+
+
+def _get_permutation_list_new(series_ids, number_of_trees, meta, global_input_selection=True):
+    """
+    INPUT:
+    -------------------------------------------------------------------------------------------------------
+    series_ids:             list - list of all dendrometer time series ids.
+    number_of_trees:        integer - number of individual dendrometer time series to consider as input for the model.
+    meta:                   data frame - the metadata corresponding to the input time series
+    global_input_selection: boolean - If true, tree signals AND their permutations for the model input are 
+                            selected randomly from all plots. If false, tree signals and their permutations 
+                            are sampled only from the same plot as the label signal.
+
+    OUTPUT:
+    -------------------------------------------------------------------------------------------------------
+    """
+
+    print('Calculating permutations...')
+
+    if global_input_selection:
+        print('<-> Selecting randomly signals from all sites')
+    else:
+        print('<-> Using signals from same sites only')
+    dictionary = dict()
+    for i in range(len(series_ids)):
+        # NOTE: each signal with series id series_ids[i] is the LABEL or reference signal. It is NOT part of the model input. 
+        # It will be used as the ground truth. To this signal other dendrometer signals are associated, 
+        # which will be part of the model input.
+        permutation_list = []
+        ids = series_ids[:i] + series_ids[i + 1:]  # NOTE: Removes and excludes the id under consideration, i.e. id with index 'i'.
+        if global_input_selection:
+            # NOTE: If the list of available signal ids is [1, 2, 3, 4, 5, 6] and nuber_of_trees = 3, then this method returns [[1,2,3],[4,5,6]] 
+            # as the permutations. In reality, we should have [1,2,3], [1,2,4], [1,2,5], [1,2,6], [2,3,4], [2,3,5] .... 
+            if len(ids) >= number_of_trees: 
+                input_sets = int(len(ids)/number_of_trees)
+                if input_sets >= 1:
+                    selection = np.random.choice(ids, input_sets * number_of_trees, replace=False)
+                    # NOTE: selects n='input_sets*number_of_trees' random ids without replacement
+                    selection = selection.reshape((input_sets, number_of_trees))
+                    # NOTE: reshapes the ids into n='permutation_sampels' sets of m='number_of_trees'.
+                else:
+                    print("ERROR! There are not enough dendrometer signals to create a tuple for the requested " + str(number_of_trees) + "-tree input combination!")
+            
+                # NOTE: the permutation_list collects all the permutation sequences corresponding to a single key/index
+                for sequence in selection:  # NOTE: slection contains n randomly selected sequences, n=see previous note
+                    for element in itertools.permutations(sequence):  # NOTE: returns all the permutations.
+                        permutation_list.append(element)
+        else:
+            ids_site = []
+            # NOTE: find site that corresponds to signal
+            site_id = meta[meta['series_id'] == series_ids[i]]['site_id'].values[0]
+            for e in ids:
+                # NOTE: select only signals from the same site
+                if meta[meta['series_id'] == e]['site_id'].values[0] == site_id:
+                    ids_site.append(e)
+            # NOTE: the total number of signals, number_of_trees, on a particular site should be more than 'number_of_trees'.
+            if len(ids_site) >= number_of_trees:
+                # NOTE: The list ids_site does not contain the id of the label/reference signal because the list is a sub-list of ids, which excludes the label signal.
+                #       The length of the ids_site list should be at least as long as nuber_of_trees. This gives a single combination. 
+                for element in itertools.permutations(ids_site, number_of_trees): # NOTE: iterates over all permutations of 'number_of_trees' elements
+                    permutation_list.append(element)
+
+        dictionary[series_ids[i]] = permutation_list
+
+    return dictionary
+
 
 
 def _get_permutation_list(series_ids, number_of_trees, input_sets, meta, global_input_selection=True):
@@ -184,7 +258,7 @@ def _get_permutation_list(series_ids, number_of_trees, input_sets, meta, global_
             # NOTE: the total number of signals, number_of_trees, on a particular site should be more than 'number_of_trees'.
             if len(ids_site) >= number_of_trees:
                 # NOTE: The list ids_site does not contain the id of the label/reference signal because the list is a sub-list of ids, which excludes the label signal.
-                #       The length of the ids_site list should be at least as long as nuber_of_trees. This gives a single permutation/combination. 
+                #       The length of the ids_site list should be at least as long as nuber_of_trees. This gives a single combination. 
                 for element in itertools.permutations(ids_site, number_of_trees): # NOTE: iterates over all permutations of 'number_of_trees' elements
                     permutation_list.append(element)
 

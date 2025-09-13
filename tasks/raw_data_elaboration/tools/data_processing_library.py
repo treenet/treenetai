@@ -7,10 +7,11 @@ import itertools
 import tensorflow as tf
 import random
 
-#################### !!!!! W A R N I N G !!!!! ##################################
+#################### !!!!! W A R N I N G !!!!! ######################################################
 # This library is old and should be removed at some point. Its functions have been moved
 # to the following files: tfrecords.py, signal_reconstruction.py, gap-filling.py and segmentation.py
 # ONLY FOR REFERENCE! Don't modify or apply.
+#################### !!!!! W A R N I N G !!!!! ######################################################
 
 
 

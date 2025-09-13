@@ -41,7 +41,7 @@ def add_gaps(segment, gap_size_days, gap_type, channels, time_resolution):
 
 
 
-def weighted_random_subset(channels):
+def weighted_random_subset(channels, main_channel):
     """
     Input: list of channels/physical properties/column names to choose from
     Output: list of randomly selected channels
@@ -52,7 +52,7 @@ def weighted_random_subset(channels):
     a random number. All these parameters are defined within the function. In order
     to change them, they have to be changed inside the function.
     """
-    subset = ['GRO']
+    subset = [main_channel]
     remaining = channels[1:]
 
     # Generate weights for number of additional elements

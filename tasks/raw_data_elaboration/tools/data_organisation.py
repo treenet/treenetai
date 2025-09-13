@@ -104,11 +104,11 @@ def get_hourly_data(input):
     
     df = input.copy() # NOTE: this dataframe copy process eliminates the SettingWithCopyWarning Error.
 
-    df.loc[:, 'year'] = df.ts.dt.year  # note: add a column with the year
-    df.loc[:, 'month'] = df.ts.dt.month  # note: add a column with the month
-    df.loc[:, 'day'] = df.ts.dt.day  # note: add a column with the month
-    df.loc[:, 'doy'] = df.ts.dt.dayofyear  # note: add a column with the day of year
-    df.loc[:, 'hour'] = df.ts.dt.hour  # note: add a column with the hour of day
+    df.loc[:, 'year'] = df.ts.dt.year  # NOTE: add a column with the year
+    df.loc[:, 'month'] = df.ts.dt.month  # NOTE: add a column with the month
+    df.loc[:, 'day'] = df.ts.dt.day  # NOTE: add a column with the month
+    df.loc[:, 'doy'] = df.ts.dt.dayofyear  # NOTE: add a column with the day of year
+    df.loc[:, 'hour'] = df.ts.dt.hour  # NOTE: add a column with the hour of day
     
     temp = df.groupby(['year', 'doy', 'hour'])
     d_out = {'ts': [], 'value': []}
