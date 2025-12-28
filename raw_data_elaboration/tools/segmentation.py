@@ -15,7 +15,7 @@ import random
 def make_segments(df, length_in_days, stride, time_resolution):
     """
     Input: pandas data frame
-    Output: pandas data farame
+    Output: list of pandas data farames
 
     # - Creates segments of fixed length
     # - Removes time stamp from data frame
@@ -84,7 +84,7 @@ def normalize_dataframe(df):
             minima[e] = min_val
             if pd.isna(min_val) or pd.isna(max_val): # If True, then all the values in the column are NaNs
                 df_normalized[e] = df[e] # return the original column values, i.e. leave the NaNs.
-                differences[e] = pd.NA
+                differences[e] = np.nan
             else:
                 difference = max_val - min_val
                 if np.abs(difference) > 1e-4:

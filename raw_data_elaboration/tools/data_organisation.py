@@ -57,7 +57,7 @@ def get_yearly_data_by_id(dictionary):
 
 def get_yearly_data_by_year(dictionary, yearly_by_id):
     """ Sorts the yearly time series according to year. 
-    Creates a dictionary where the key is the year and the value are time series of different sensors of the same year. 
+    Creates a dictionary where the key is the year and the values are time series of different sensors of the same year. 
     """
     # NOTE: take care of leap years, they are also included
     if not yearly_by_id:
@@ -95,14 +95,14 @@ def get_monthly_data(metadata, data): # TODO
 
 # HOURLY scale
 
-def get_hourly_data(input):
+def get_hourly_data(input_df):
     """ The function averages the data over every hour.
     Input: A time series with 10 min resolution
     Output: A time series with 1 h resolution
     IMPORTANT: make sure that the dataframes have DOY and hour columns
     """
     
-    df = input.copy() # NOTE: this dataframe copy process eliminates the SettingWithCopyWarning Error.
+    df = input_df.copy() # NOTE: this dataframe copy process eliminates the SettingWithCopyWarning Error.
 
     df.loc[:, 'year'] = df.ts.dt.year  # NOTE: add a column with the year
     df.loc[:, 'month'] = df.ts.dt.month  # NOTE: add a column with the month

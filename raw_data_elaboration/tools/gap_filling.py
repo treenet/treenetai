@@ -18,6 +18,7 @@ def add_gaps(segment, gap_size_days, gap_type, channels, time_resolution):
     Adds gaps to segments of a time series
     """
     # TODO (gap_type): add the possibility of sampling gap sizes from a uniform and an exponential distribution
+    # TODO: add the posibility of filling the gaps with -1 and not just NaN.
 
     segment_modified = segment.copy()
     gap_size = gap_size_days * 24 * time_resolution
