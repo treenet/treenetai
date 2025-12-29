@@ -1,29 +1,64 @@
 # multichannel_pipeline_tf.py
 # -*- coding: utf-8 -*-
 """
-Multichannel Time-Series Pipeline (TensorFlow/Keras) with Per-Site Lag Correction
-and Segment-Level Provenance Export
+Multichannel Time-Series Pipeline (TensorFlow/Keras)
+===================================================
 
 Author: M365 Copilot (for Mirko Lukovic)
 Date: 2025-12-28
 
-This pipeline:
-- Applies per-site fixed lag correction using diagnostics from `lag_diagnostic.py`
-- Cleans inputs (Hampel; optional LOWESS)
-- Trains a TCN-style multitask model (10-min reconstruction + hourly targets)
-- Evaluates against baselines
-- Detects RH drift via Page–Hinkley with overlap consensus
-- Exports segment-level provenance CSVs for train and test splits
+This single file implements an end-to-end pipeline for:
+
+- Preprocessing & cleaning 30-day, 10-min resolution segments with a 10-day overlap
+- Optional misalignment (lag) correction using cross-correlation
+- Outlier detection (Hampel filter) and optional drift trend extraction
+- Training a multi-task temporal model (TCN-style) that:
+    * Reconstructs/imputes the 10-min multichannel input (focus on local channels)
+    * Predicts cleaned hourly outputs for the 3 local targets (T, RH, Stem)
+- Evaluation with baselines (linear interpolation for imputation; persistence for hourly targets)
+- Residual-based drift detection for RH using Page–Hinkley
+- Physics-aware post-processing hooks (RH bounds) and provenance flags
+- Overlap-aware consensus of drift alarms across adjacent segments
+
+Assumptions & Data Format
+-------------------------
+- Inputs are normalized per segment to [0,1]. Keep the per-channel scalers for inverse transform if needed.
+- Shapes:
+    X_train: (N_train, 4320, 11)
+    y_train: (N_train, 720, 3)
+    X_test:  (N_test,  4320, 11)
+    y_test:  (N_test,  720, 3)
+- Channels (zero-based index):
+    0: local mean temperature (°C), 10-min, raw before normalization
+    1: local relative humidity (%), 10-min, raw before normalization
+    2: local tree stem radius change (µm), 10-min, raw before normalization
+    3: GLOBAL mean temperature (°C), daily cleaned
+    4: GLOBAL min temperature (°C), daily cleaned
+    5: GLOBAL max temperature (°C), daily cleaned
+    6: GLOBAL relative humidity (%), daily cleaned
+    7: GLOBAL vapor pressure deficit (kPa), daily cleaned
+    8: GLOBAL precipitation (mm), daily cleaned
+    9: GLOBAL solar radiation (W m^-2), daily cleaned
+    10: day of year (DOY), daily
+
+- Targets y_* (hourly, cleaned): columns [local T (°C), local RH (%), local Stem (µm)] in normalized domain.
+
+Usage
+-----
+1) Replace the placeholder loaders in `if __name__ == "__main__":` with your actual arrays.
+2) Tune configuration flags (e.g., AUGMENT_WITH_GAPS, use_misalignment_correction).
+3) Run: `python multichannel_pipeline_tf.py` to train and evaluate.
+
 """
 
 from __future__ import annotations
 import os
 import typing as t
 import numpy as np
-import pandas as pd
 import tensorflow as tf
 from tensorflow.keras import layers, Model
 
+# Optional: try to import statsmodels for LOWESS; fall back to rolling-median trend if unavailable
 try:
     import statsmodels.api as sm
     HAS_STATSMODELS = True
@@ -33,12 +68,13 @@ except Exception:
 # =====================
 # Configuration
 # =====================
-SEQ_LEN_10MIN: int = 4320
-HOUR_STEPS: int = 720
+SEQ_LEN_10MIN: int = 4320  # 30 days * 24 h/day * 6 steps/h
+HOUR_STEPS: int = 720      # 30 days * 24 h
 STRIDE_PER_HOUR: int = 6
 N_CHANNELS: int = 11
 N_TARGETS: int = 3
 
+# Channel indices (zero-based)
 CH = {
     'local_T_10m': 0,
     'local_RH_10m': 1,
@@ -53,27 +89,31 @@ CH = {
     'DOY_daily': 10,
 }
 
-AUGMENT_WITH_GAPS: bool = True
+# Training & augmentation
+AUGMENT_WITH_GAPS: bool = True         # on-the-fly random gaps during training
 GAP_CHANNEL_PROB: float = 0.5
 N_GAPS_RANGE: t.Tuple[int, int] = (1, 3)
 GAP_LEN_DAYS_RANGE: t.Tuple[int, int] = (1, 12)
 RNG = np.random.default_rng(42)
 
+# Misalignment correction
+USE_MISALIGNMENT_CORRECTION: bool = True
+MAX_LAG_STEPS: int = 6 * 24  # up to 24 hours of lag at 10-min resolution
+
+# Cleaning
 USE_HAMPEL_FILTER: bool = True
 HAMPEL_WINDOW: int = 13
 HAMPEL_SIGMAS: float = 3.0
-USE_LOWESS_DETREND: bool = False
-LOWESS_FRAC: float = 0.02
+USE_LOWESS_DETREND: bool = False   # set True to subtract slow trend from selected channels
+LOWESS_FRAC: float = 0.02          # ~86 steps (~14.3 hours) over 4320
 LOWESS_IT: int = 3
 
-USE_MISALIGNMENT_CORRECTION: bool = False
-APPLY_SITE_SPECIFIC_LAG: bool = True
-LAG_POLICY_FILE: str = os.path.join('diagnostics', 'lag_by_site.csv')
-
+# Loss weights
 W_RECON_MASKED: float = 1.0
 W_RECON_UNMASKED: float = 0.05
 W_HOURLY: float = 1.0
 
+# Optimization
 BATCH_SIZE: int = 32
 LR: float = 3e-4
 EPOCHS: int = 100
@@ -81,11 +121,13 @@ EARLY_STOP_PATIENCE: int = 10
 REDUCE_LR_PATIENCE: int = 4
 MIN_LR: float = 1e-6
 
-PH_DELTA: float = 0.003
-PH_LAM: float = 0.02
-PH_ALPHA: float = 30.0
+# Drift detection (Page–Hinkley) on RH residuals
+PH_DELTA: float = 0.003   # small allowed change (tune via training residuals)
+PH_LAM: float = 0.02      # mean smoothing
+PH_ALPHA: float = 30.0    # threshold (alarm when exceeded)
 
-OVERLAP_HOURS: int = 240
+# Overlap consensus
+OVERLAP_HOURS: int = 240  # 10 days * 24 h
 CONSENSUS_MARGIN_HOURS: int = 6
 
 # =====================
@@ -93,16 +135,22 @@ CONSENSUS_MARGIN_HOURS: int = 6
 # =====================
 
 def inject_random_gaps(x: np.ndarray, rng=RNG) -> t.Tuple[np.ndarray, np.ndarray]:
+    """Inject gaps (set values to 0; mask=0) in randomly chosen channels and positions.
+    Returns: x_masked, mask with shape (4320, 11), dtype float32.
+    """
     x = x.copy().astype(np.float32)
     mask = np.ones_like(x, dtype=np.float32)
+
     n_gaps = rng.integers(N_GAPS_RANGE[0], N_GAPS_RANGE[1] + 1)
     chosen_channels = [c for c in range(x.shape[1]) if rng.random() < GAP_CHANNEL_PROB]
     if not chosen_channels:
         chosen_channels = [rng.integers(0, x.shape[1])]
+
     for _ in range(n_gaps):
         ch = rng.choice(chosen_channels)
         gap_len_days = rng.integers(GAP_LEN_DAYS_RANGE[0], GAP_LEN_DAYS_RANGE[1] + 1)
-        gap_len = min(gap_len_days * 24 * 6, SEQ_LEN_10MIN - 1)
+        gap_len = gap_len_days * 24 * 6
+        gap_len = min(gap_len, SEQ_LEN_10MIN - 1)
         start = rng.integers(0, SEQ_LEN_10MIN - gap_len)
         end = start + gap_len
         x[start:end, ch] = 0.0
@@ -111,6 +159,9 @@ def inject_random_gaps(x: np.ndarray, rng=RNG) -> t.Tuple[np.ndarray, np.ndarray
 
 
 def hampel_filter(x: np.ndarray, window_size: int = HAMPEL_WINDOW, n_sigmas: float = HAMPEL_SIGMAS) -> np.ndarray:
+    """Hampel filter to detect spikes; returns boolean flags of outlier positions.
+    Implemented with rolling median and MAD; no external dependencies.
+    """
     x = np.asarray(x)
     T = len(x)
     k = int(window_size)
@@ -127,11 +178,15 @@ def hampel_filter(x: np.ndarray, window_size: int = HAMPEL_WINDOW, n_sigmas: flo
 
 
 def lowess_detrend(x: np.ndarray, frac: float = LOWESS_FRAC, it: int = LOWESS_IT) -> t.Tuple[np.ndarray, np.ndarray]:
+    """LOWESS detrending (subtract smooth trend). Falls back to rolling median if statsmodels is unavailable.
+    Returns: x_detrended, trend
+    """
     T = len(x)
     xi = np.arange(T)
     if HAS_STATSMODELS:
         trend = sm.nonparametric.lowess(x, xi, frac=frac, it=it, return_sorted=False)
     else:
+        # Fallback: rolling median as a robust trend estimator
         win = max(5, int(frac * T))
         if win % 2 == 0:
             win += 1
@@ -142,7 +197,38 @@ def lowess_detrend(x: np.ndarray, frac: float = LOWESS_FRAC, it: int = LOWESS_IT
     return x_detr.astype(np.float32), trend.astype(np.float32)
 
 
+def estimate_fixed_lag(x: np.ndarray, y: np.ndarray, max_lag_steps: int = MAX_LAG_STEPS, robust: bool = True) -> t.Tuple[int, float]:
+    """Estimate lag (in steps) to best align x with y via cross-correlation.
+    Positive lag means x should be shifted forward.
+    Returns: best_lag, best_corr
+    """
+    x_ = x.copy()
+    y_ = y.copy()
+    if robust:
+        # Remove linear trend (approx via first differences) and median
+        x_ = np.diff(x_, prepend=x_[0]) - np.median(np.diff(x_, prepend=x_[0]))
+        y_ = np.diff(y_, prepend=y_[0]) - np.median(np.diff(y_, prepend=y_[0]))
+    lags = np.arange(-max_lag_steps, max_lag_steps + 1)
+    corr = []
+    for L in lags:
+        if L >= 0:
+            xc = x_[L:]
+            yc = y_[:len(x_) - L]
+        else:
+            xc = x_[:len(x_) + L]
+            yc = y_[-L:]
+        if len(xc) < 10:
+            corr.append(-np.inf)
+        else:
+            c = np.corrcoef(xc, yc)[0, 1]
+            corr.append(c)
+    best_idx = int(np.argmax(corr))
+    best_lag = int(lags[best_idx])
+    return best_lag, float(corr[best_idx])
+
+
 def shift_series(x: np.ndarray, lag: int) -> np.ndarray:
+    """Shift series by lag steps with zero-fill at edges."""
     T = len(x)
     y = np.zeros_like(x)
     if lag > 0:
@@ -153,134 +239,27 @@ def shift_series(x: np.ndarray, lag: int) -> np.ndarray:
         y[:] = x
     return y
 
-# =====================
-# Per-site lag policy
-# =====================
-
-def load_lag_policy(path: str) -> dict[int, dict[str, int]]:
-    if not os.path.exists(path):
-        print(f"Lag policy file not found: {path}. Skipping per-site lag correction.")
-        return {}
-    df = pd.read_csv(path)
-    lag_map: dict[int, dict[str, int]] = {}
-    for _, row in df.iterrows():
-        try:
-            sid = int(row['site_id'])
-        except Exception:
-            continue
-        pair = str(row['pair'])
-        rec = str(row.get('recommendation', 'SKIP_CORRECTION'))
-        lag_steps = int(round(row.get('median_lag_steps', 0)))
-        if rec == 'APPLY_FIXED_LAG_CORRECTION':
-            d = lag_map.setdefault(sid, {})
-            d[pair] = lag_steps
-    print(f"Loaded lag policy for {len(lag_map)} sites from {path}.")
-    return lag_map
-
-PAIR_TO_LOCAL_CH = {
-    'T_vs_Tmean': CH['local_T_10m'],
-    'RH_vs_RHdaily': CH['local_RH_10m'],
-    'STEM_vs_RAD': CH['local_stem_10m'],
-}
-
-# =====================
-# Segment-level provenance utilities
-# =====================
-
-def compute_hampel_counts(x: np.ndarray, channels: t.Sequence[int]) -> dict:
-    counts = {}
-    for ch in channels:
-        flags = hampel_filter(x[:, ch], window_size=HAMPEL_WINDOW, n_sigmas=HAMPEL_SIGMAS)
-        counts[ch] = int(np.sum(flags))
-    return counts
-
-
-def segment_provenance_row(x_10m: np.ndarray, site_id: int, lag_map: dict[int, dict[str, int]],
-                           training: bool = True) -> dict:
-    x = x_10m.copy().astype(np.float32)
-    sid = int(site_id)
-
-    lag_T = lag_map.get(sid, {}).get('T_vs_Tmean', None)
-    lag_RH = lag_map.get(sid, {}).get('RH_vs_RHdaily', None)
-    lag_STEM = lag_map.get(sid, {}).get('STEM_vs_RAD', None)
-
-    if lag_T is not None:
-        x[:, CH['local_T_10m']] = shift_series(x[:, CH['local_T_10m']], int(lag_T))
-    if lag_RH is not None:
-        x[:, CH['local_RH_10m']] = shift_series(x[:, CH['local_RH_10m']], int(lag_RH))
-    if lag_STEM is not None:
-        x[:, CH['local_stem_10m']] = shift_series(x[:, CH['local_stem_10m']], int(lag_STEM))
-
-    hampel_counts = compute_hampel_counts(x, [CH['local_T_10m'], CH['local_RH_10m'], CH['local_stem_10m']])
-
-    x_pc, mask_pc, _ = apply_preclean(x, use_hampel=USE_HAMPEL_FILTER, use_lowess=USE_LOWESS_DETREND,
-                                      lowess_channels=[CH['local_RH_10m']] if USE_LOWESS_DETREND else None)
-
-    aug_applied = bool(training and AUGMENT_WITH_GAPS)
-    aug_steps = 0
-    mask_final = mask_pc
-    if aug_applied:
-        x_masked, aug_mask = inject_random_gaps(x_pc)
-        mask_final = (mask_pc * aug_mask).astype(np.float32)
-        aug_steps = int(np.sum(mask_pc == 1.0) - np.sum(mask_final == 1.0))
-
-    frac_imputed_total = float(np.mean(1.0 - mask_final))
-
-    row = {
-        'site_id': sid,
-        'lag_applied_T': bool(lag_T is not None),
-        'lag_steps_T': int(lag_T) if lag_T is not None else 0,
-        'lag_applied_RH': bool(lag_RH is not None),
-        'lag_steps_RH': int(lag_RH) if lag_RH is not None else 0,
-        'lag_applied_STEM': bool(lag_STEM is not None),
-        'lag_steps_STEM': int(lag_STEM) if lag_STEM is not None else 0,
-        'hampel_spikes_T': int(hampel_counts.get(CH['local_T_10m'], 0)),
-        'hampel_spikes_RH': int(hampel_counts.get(CH['local_RH_10m'], 0)),
-        'hampel_spikes_STEM': int(hampel_counts.get(CH['local_stem_10m'], 0)),
-        'lowess_detrend_RH': bool(USE_LOWESS_DETREND),
-        'augmentation_applied': aug_applied,
-        'aug_total_steps_masked': aug_steps,
-        'frac_imputed_total': frac_imputed_total,
-    }
-    return row
-
-
-def export_provenance_table(X: np.ndarray, site_ids: np.ndarray, split_name: str, lag_map: dict[int, dict[str, int]],
-                            training: bool) -> str:
-    rows = []
-    for i in range(X.shape[0]):
-        r = segment_provenance_row(X[i], int(site_ids[i]) if site_ids is not None else -1, lag_map, training=training)
-        r['segment_idx'] = i
-        rows.append(r)
-    df = pd.DataFrame(rows)
-    out_dir = os.path.join('diagnostics')
-    os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, f'provenance_segments_{split_name}.csv')
-    df.to_csv(out_path, index=False)
-    print(f"Wrote segment-level provenance to {out_path} (rows={len(df)})")
-    return out_path
-
-# =====================
-# Dataset builders
-# =====================
-
-def apply_site_fixed_lag(x: np.ndarray, site_id: int, lag_map: dict[int, dict[str, int]]) -> np.ndarray:
-    if site_id in lag_map:
-        for pair_name, lag_steps in lag_map[site_id].items():
-            ch_idx = PAIR_TO_LOCAL_CH.get(pair_name)
-            if ch_idx is not None:
-                x[:, ch_idx] = shift_series(x[:, ch_idx], int(lag_steps))
-    return x
-
 
 def apply_preclean(x: np.ndarray,
                    use_hampel: bool = USE_HAMPEL_FILTER,
                    use_lowess: bool = USE_LOWESS_DETREND,
                    lowess_channels: t.Optional[t.Sequence[int]] = None) -> t.Tuple[np.ndarray, np.ndarray, dict]:
+    """Apply pre-cleaning: Hampel spikes -> set missing; optional LOWESS detrend.
+    Args:
+        x: (4320, C) normalized input
+        use_hampel: whether to flag spikes
+        use_lowess: whether to subtract slow trend
+        lowess_channels: list of channel indices to detrend (e.g., [CH['local_RH_10m']])
+    Returns:
+        x_clean: (4320, C)
+        mask: (4320, C) where 1=observed, 0=missing after cleaning
+        trends: dict {channel_index: trend_series}
+    """
     x = x.copy().astype(np.float32)
     T, C = x.shape
     mask = np.ones_like(x, dtype=np.float32)
     trends: dict = {}
+
     for c in range(C):
         xc = x[:, c]
         if use_hampel:
@@ -295,20 +274,27 @@ def apply_preclean(x: np.ndarray,
     return x, mask, trends
 
 
+# =====================
+# Dataset builders
+# =====================
+
 def make_example(x_10m: np.ndarray,
                  y_hourly: np.ndarray,
-                 site_id: int,
-                 lag_map: dict[int, dict[str, int]],
                  training: bool = True,
-                 preclean: bool = True) -> t.Tuple[dict, dict, dict]:
+                 preclean: bool = True,
+                 misalign_correction: bool = USE_MISALIGNMENT_CORRECTION) -> t.Tuple[dict, dict, dict]:
+    """Build one training/eval example with optional pre-clean and misalignment correction.
+    Returns:
+      inputs: {'x_in': (4320, 11), 'mask_in': (4320, 11)}
+      outputs: {'recon': (4320, 11), 'hourly': (720, 3)}
+      sample_weights: {'recon': (4320, 11), 'hourly': (720, 3)}
+    """
     x = x_10m.astype(np.float32)
     y = y_hourly.astype(np.float32)
 
-    if APPLY_SITE_SPECIFIC_LAG and lag_map:
-        x = apply_site_fixed_lag(x, int(site_id), lag_map)
-
+    # Pre-clean (Hampel/outliers; optional LOWESS on selected channels)
     if preclean:
-        x, mask_clean, _ = apply_preclean(
+        x, mask_clean, _trends = apply_preclean(
             x,
             use_hampel=USE_HAMPEL_FILTER,
             use_lowess=USE_LOWESS_DETREND,
@@ -317,18 +303,31 @@ def make_example(x_10m: np.ndarray,
     else:
         mask_clean = np.ones_like(x, dtype=np.float32)
 
-    if USE_MISALIGNMENT_CORRECTION:
-        pass
+    # Misalignment correction (fixed-lag) for local vs global proxies
+    if misalign_correction:
+        # Align local T with global mean T
+        lag_T, _ = estimate_fixed_lag(x[:, CH['local_T_10m']], x[:, CH['global_T_mean_daily']], MAX_LAG_STEPS)
+        x[:, CH['local_T_10m']] = shift_series(x[:, CH['local_T_10m']], lag_T)
+        # Align local RH with global RH (positive corr) or VPD (negative corr). Prefer RH.
+        lag_RH, _ = estimate_fixed_lag(x[:, CH['local_RH_10m']], x[:, CH['global_RH_daily']], MAX_LAG_STEPS)
+        x[:, CH['local_RH_10m']] = shift_series(x[:, CH['local_RH_10m']], lag_RH)
+        # Align stem with radiation or mean T (heuristic)
+        lag_stem, _ = estimate_fixed_lag(x[:, CH['local_stem_10m']], x[:, CH['global_rad_daily']], MAX_LAG_STEPS)
+        x[:, CH['local_stem_10m']] = shift_series(x[:, CH['local_stem_10m']], lag_stem)
 
+    # Training-time synthetic gaps augmentation
     if training and AUGMENT_WITH_GAPS:
         x_masked, aug_mask = inject_random_gaps(x)
+        # combine preclean mask and augmentation mask via AND (both 1 => observed)
         mask = (mask_clean * aug_mask).astype(np.float32)
     else:
         x_masked = x
         mask = mask_clean
 
+    # Reconstruction weights
     w_recon = W_RECON_UNMASKED * np.ones_like(mask, dtype=np.float32)
     w_recon[mask == 0.0] = W_RECON_MASKED
+    # Hourly weights uniform
     w_hourly = W_HOURLY * np.ones_like(y, dtype=np.float32)
 
     inputs = {'x_in': x_masked, 'mask_in': mask}
@@ -339,16 +338,15 @@ def make_example(x_10m: np.ndarray,
 
 def make_tf_dataset(X: np.ndarray,
                     Y: np.ndarray,
-                    site_ids: np.ndarray,
-                    lag_map: dict[int, dict[str, int]],
                     batch_size: int = BATCH_SIZE,
                     training: bool = True,
                     shuffle: bool = True,
                     preclean: bool = True) -> tf.data.Dataset:
+    """Create tf.data.Dataset that yields (inputs, outputs, sample_weights)."""
     def gen():
         for i in range(X.shape[0]):
-            sid = int(site_ids[i]) if site_ids is not None else -1
-            inp, out, sw = make_example(X[i], Y[i], sid, lag_map, training=training, preclean=preclean)
+            inp, out, sw = make_example(X[i], Y[i], training=training, preclean=preclean,
+                                       misalign_correction=USE_MISALIGNMENT_CORRECTION)
             yield inp, out, sw
 
     output_signature = (
@@ -371,8 +369,9 @@ def make_tf_dataset(X: np.ndarray,
     ds = ds.batch(batch_size).prefetch(tf.data.AUTOTUNE)
     return ds
 
+
 # =====================
-# Model
+# Model (TCN-style encoder + two heads)
 # =====================
 
 def TemporalBlock(filters: int, dilation_rate: int, dropout: float = 0.1, name: str | None = None):
@@ -393,30 +392,44 @@ def TemporalBlock(filters: int, dilation_rate: int, dropout: float = 0.1, name: 
 def build_model() -> tf.keras.Model:
     x_in = layers.Input(shape=(SEQ_LEN_10MIN, N_CHANNELS), name='x_in')
     m_in = layers.Input(shape=(SEQ_LEN_10MIN, N_CHANNELS), name='mask_in')
-    z = layers.Concatenate(axis=-1, name='concat_mask')([x_in, m_in])
+
+    # Concatenate mask to inputs so the model knows where values are missing
+    z = layers.Concatenate(axis=-1, name='concat_mask')([x_in, m_in])  # (T, 22)
     z = layers.Conv1D(64, kernel_size=5, padding='same', name='emb_conv')(z)
     z = layers.Activation('gelu')(z)
+
     for i, d in enumerate([1, 2, 4, 8, 16, 32]):
         z = TemporalBlock(128, dilation_rate=d, dropout=0.1, name=f'block{i+1}')(z)
+
     feat_10m = layers.Conv1D(128, kernel_size=1, padding='same', name='shared_1x1')(z)
     feat_10m = layers.Activation('gelu')(feat_10m)
+
+    # Reconstruction head (10-min)
     recon = layers.Conv1D(N_CHANNELS, kernel_size=1, padding='same', name='recon_head')(feat_10m)
+
+    # Hourly head (pool 6 x 10-min -> 1 hour)
     hourly_feat = layers.AveragePooling1D(pool_size=STRIDE_PER_HOUR, strides=STRIDE_PER_HOUR,
-                                          padding='valid', name='to_hourly')(feat_10m)
+                                          padding='valid', name='to_hourly')(feat_10m)  # (720, 128)
     hourly_feat = layers.Conv1D(64, kernel_size=1, activation='gelu', name='hourly_proj')(hourly_feat)
     hourly = layers.Conv1D(N_TARGETS, kernel_size=1, padding='same', name='hourly_head')(hourly_feat)
+
     return Model(inputs={'x_in': x_in, 'mask_in': m_in}, outputs={'recon': recon, 'hourly': hourly},
                  name='multitask_impute_hourly')
 
 
 def masked_mse(y_true, y_pred):
+    # Masking is handled through sample_weights provided in model.fit()
     return tf.reduce_mean(tf.square(y_true - y_pred))
 
+
 # =====================
-# Baselines & Drift
+# Baselines
 # =====================
 
 def linear_interp_impute(x: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """Per-channel linear interpolation along time for masked positions.
+    Assumes x contains neutral fills at masked positions. Edge padding with nearest observed.
+    """
     x_imp = x.copy()
     T, C = x.shape
     idx = np.arange(T)
@@ -424,6 +437,7 @@ def linear_interp_impute(x: np.ndarray, mask: np.ndarray) -> np.ndarray:
         m = mask[:, c].astype(bool)
         if m.all():
             continue
+        # Edge handling
         if not m[0]:
             first_obs = np.argmax(m)
             x_imp[:first_obs, c] = x_imp[first_obs, c]
@@ -437,12 +451,20 @@ def linear_interp_impute(x: np.ndarray, mask: np.ndarray) -> np.ndarray:
 
 
 def persistence_hourly(y_true: np.ndarray) -> np.ndarray:
+    """Persistence baseline: y[t] = y[t-1]; y[0] = y[0]."""
     y_pred = y_true.copy()
     y_pred[1:] = y_true[:-1]
     return y_pred
 
 
+# =====================
+# Drift detection (Page–Hinkley) on RH residuals
+# =====================
+
 def page_hinkley(residuals: np.ndarray, delta: float = PH_DELTA, lam: float = PH_LAM, alpha: float = PH_ALPHA) -> np.ndarray:
+    """Page–Hinkley change detector for mean shifts.
+    Returns indices (hours) where change is detected.
+    """
     T = residuals.shape[0]
     mean_est = 0.0
     ph = 0.0
@@ -462,6 +484,7 @@ def page_hinkley(residuals: np.ndarray, delta: float = PH_DELTA, lam: float = PH
 
 
 def rh_residuals(model: tf.keras.Model, x_10m: np.ndarray, y_hourly: np.ndarray) -> np.ndarray:
+    """Compute hourly RH residuals: true - predicted."""
     pred = model.predict({'x_in': x_10m[None, ...], 'mask_in': np.ones_like(x_10m)[None, ...]}, verbose=0)
     rh_true = y_hourly[:, 1]
     rh_hat = pred['hourly'][0, :, 1]
@@ -470,45 +493,82 @@ def rh_residuals(model: tf.keras.Model, x_10m: np.ndarray, y_hourly: np.ndarray)
 
 def overlap_consensus(alarms_per_segment: t.List[np.ndarray], overlap_hours: int = OVERLAP_HOURS,
                       margin_hours: int = CONSENSUS_MARGIN_HOURS) -> t.List[t.Tuple[int, int]]:
+    """Simple adjacency-based consensus across segments with fixed overlap.
+    We assume consecutive segments overlap by `overlap_hours` at the end/beginning.
+    If segment i has an alarm at hour h in its last overlap region,
+    and segment i+1 has an alarm within ±margin_hours at its first overlap region,
+    we record a high-confidence alarm (segment_index, hour).
+    Returns list of (segment_index, hour) for consensus alarms.
+    """
     consensus = []
     for i in range(len(alarms_per_segment) - 1):
         a_i = alarms_per_segment[i]
         a_j = alarms_per_segment[i + 1]
         if a_i.size == 0 or a_j.size == 0:
             continue
+        # Overlap zones: last `overlap_hours` of i, first `overlap_hours` of j
         for h_i in a_i:
             if h_i >= (HOUR_STEPS - overlap_hours):
+                # candidate in the tail of segment i
                 for h_j in a_j:
                     if h_j <= overlap_hours and abs((h_i - (HOUR_STEPS - overlap_hours)) - h_j) <= margin_hours:
                         consensus.append((i, int(h_i)))
                         break
     return consensus
 
+
 # =====================
-# Training / Evaluation
+# Post-processing & provenance
 # =====================
 
-def train_and_evaluate(X_train: np.ndarray, y_train: np.ndarray, site_ids_train: np.ndarray,
-                       X_test: np.ndarray, y_test: np.ndarray, site_ids_test: t.Optional[np.ndarray] = None) -> tf.keras.Model:
-    # Load lag policy
-    lag_map = load_lag_policy(LAG_POLICY_FILE) if APPLY_SITE_SPECIFIC_LAG else {}
+def resample_10min_to_hourly_median(x_10m: np.ndarray) -> np.ndarray:
+    """Resample (T=4320, C) to hourly (H=720, C) by median over 6 samples per hour."""
+    H = HOUR_STEPS
+    C = x_10m.shape[1]
+    return np.median(x_10m.reshape(H, STRIDE_PER_HOUR, C), axis=1)
 
-    # Export provenance for TRAIN (pre-training)
-    export_provenance_table(X_train, site_ids_train, split_name='train', lag_map=lag_map, training=True)
 
-    # Split train/val
+def make_provenance(mask_10m: np.ndarray,
+                    drift_adjusted_flags: t.Optional[np.ndarray] = None,
+                    capped_flags: t.Optional[np.ndarray] = None) -> dict:
+    """Provenance flags/stats per hour.
+    - frac_imputed_per_hour: average of (1-mask) across channels/time within the hour
+    - drift_adjusted_any_hour: boolean per hour
+    - capped_any_hour: boolean per hour
+    """
+    H = HOUR_STEPS
+    imputed_10m = 1.0 - mask_10m
+    frac_imp_hr = imputed_10m.reshape(H, STRIDE_PER_HOUR, mask_10m.shape[1]).mean(axis=(1, 2))
+    prov = {
+        'frac_imputed_per_hour': frac_imp_hr,
+        'drift_adjusted_any_hour': None,
+        'capped_any_hour': None,
+    }
+    if drift_adjusted_flags is not None:
+        prov['drift_adjusted_any_hour'] = drift_adjusted_flags.reshape(H, STRIDE_PER_HOUR).any(axis=1)
+    if capped_flags is not None:
+        prov['capped_any_hour'] = capped_flags.reshape(H, STRIDE_PER_HOUR).any(axis=1)
+    return prov
+
+
+# =====================
+# Training / Evaluation Harness
+# =====================
+
+def train_and_evaluate(X_train: np.ndarray, y_train: np.ndarray, X_test: np.ndarray, y_test: np.ndarray) -> tf.keras.Model:
+    """Train the model with 80:20 split of training set; evaluate on test; print baselines."""
+    # Train/val split
     N = X_train.shape[0]
     idx = np.arange(N)
     np.random.seed(123)
     np.random.shuffle(idx)
     split = int(0.8 * N)
     train_idx, val_idx = idx[:split], idx[split:]
+    X_tr, Y_tr = X_train[train_idx], y_train[train_idx]
+    X_val, Y_val = X_train[val_idx], y_train[val_idx]
 
-    X_tr, Y_tr, SID_tr = X_train[train_idx], y_train[train_idx], site_ids_train[train_idx]
-    X_val, Y_val, SID_val = X_train[val_idx], y_train[val_idx], site_ids_train[val_idx]
-
-    ds_tr = make_tf_dataset(X_tr, Y_tr, SID_tr, lag_map, batch_size=BATCH_SIZE, training=True, shuffle=True, preclean=True)
-    ds_val = make_tf_dataset(X_val, Y_val, SID_val, lag_map, batch_size=BATCH_SIZE, training=False, shuffle=False, preclean=True)
+    ds_tr = make_tf_dataset(X_tr, Y_tr, batch_size=BATCH_SIZE, training=True, shuffle=True, preclean=True)
+    ds_val = make_tf_dataset(X_val, Y_val, batch_size=BATCH_SIZE, training=False, shuffle=False, preclean=True)
 
     model = build_model()
     model.compile(
@@ -519,6 +579,7 @@ def train_and_evaluate(X_train: np.ndarray, y_train: np.ndarray, site_ids_train:
                             tf.keras.metrics.MeanAbsoluteError(name='mae')]},
         loss_weights={'recon': 1.0, 'hourly': 1.0}
     )
+    model.summary()
 
     callbacks = [
         tf.keras.callbacks.EarlyStopping(monitor='val_hourly_mse', patience=EARLY_STOP_PATIENCE, restore_best_weights=True),
@@ -528,42 +589,34 @@ def train_and_evaluate(X_train: np.ndarray, y_train: np.ndarray, site_ids_train:
 
     history = model.fit(ds_tr, validation_data=ds_val, epochs=EPOCHS, callbacks=callbacks)
 
-    # Evaluate on test
-    if site_ids_test is None:
-        site_ids_test = np.zeros((X_test.shape[0],), dtype=int)
-    ds_test = make_tf_dataset(X_test, y_test, site_ids_test, lag_map, batch_size=BATCH_SIZE, training=False, shuffle=False, preclean=True)
+    # Evaluate on held-out test (no synthetic gaps; preclean enabled)
+    ds_test = make_tf_dataset(X_test, y_test, batch_size=BATCH_SIZE, training=False, shuffle=False, preclean=True)
     test_metrics = model.evaluate(ds_test, return_dict=True)
-    print("
-Test metrics:", test_metrics)
+    print("\nTest metrics:", test_metrics)
 
-    # Export provenance for TEST (no augmentation)
-    export_provenance_table(X_test, site_ids_test, split_name='test', lag_map=lag_map, training=False)
-
-    # Baseline comparison (persistence)
-    hourly_mae_model, hourly_mae_pers = [], []
+    # Baseline comparison: persistence for hourly
+    hourly_mae_model = []
+    hourly_mae_pers = []
     for i in range(min(256, X_test.shape[0])):
         x = X_test[i]
-        sid = int(site_ids_test[i])
-        if APPLY_SITE_SPECIFIC_LAG and lag_map:
-            x = apply_site_fixed_lag(x, sid, lag_map)
         y = y_test[i]
         pred = model.predict({'x_in': x[None, ...], 'mask_in': np.ones_like(x)[None, ...]}, verbose=0)
-        y_hat = pred['hourly'][0]
+        y_hat = pred['hourly'][0]  # (720, 3)
         hourly_mae_model.append(np.mean(np.abs(y_hat - y)))
         hourly_mae_pers.append(np.mean(np.abs(persistence_hourly(y) - y)))
     print("Hourly MAE — model:", np.mean(hourly_mae_model), "persistence:", np.mean(hourly_mae_pers))
 
-    # Imputation baseline on injected gaps
+    # Imputation baseline on injected gaps (evaluate MAE on masked positions)
     errs_model, errs_interp = [], []
     for i in range(min(128, X_test.shape[0])):
         x = X_test[i]
-        sid = int(site_ids_test[i])
-        if APPLY_SITE_SPECIFIC_LAG and lag_map:
-            x = apply_site_fixed_lag(x, sid, lag_map)
+        # Apply preclean to simulate realistic mask
         x_pc, mask_pc, _ = apply_preclean(x, use_hampel=USE_HAMPEL_FILTER, use_lowess=USE_LOWESS_DETREND,
                                            lowess_channels=[CH['local_RH_10m']] if USE_LOWESS_DETREND else None)
+        # Inject training-like gaps for fair comparison
         x_masked, aug_mask = inject_random_gaps(x_pc)
         mask = (mask_pc * aug_mask).astype(np.float32)
+
         pred = model.predict({'x_in': x_masked[None, ...], 'mask_in': mask[None, ...]}, verbose=0)
         recon_pred = pred['recon'][0]
         interp = linear_interp_impute(x_masked, mask)
@@ -574,46 +627,45 @@ Test metrics:", test_metrics)
             errs_model.append(e_model)
             errs_interp.append(e_interp)
     if errs_model:
-        print("Imputation MAE on injected gaps — model:", np.mean(errs_model), "interp:", np.mean(errs_interp))
+        print("Imputation MAE on injected gaps — model:", np.mean(errs_model),
+              "interp:", np.mean(errs_interp))
 
     return model
 
+
 # =====================
-# Main
+# Main (replace loaders with your data)
 # =====================
 if __name__ == "__main__":
-    required_files = ['X_train.npy', 'y_train.npy', 'site_ids_train.npy', 'X_test.npy', 'y_test.npy']
-    if not all(os.path.exists(f) for f in required_files):
-        print("Please provide X_train.npy, y_train.npy, site_ids_train.npy, X_test.npy, y_test.npy.")
+    # In production, load your arrays:
+    #   X_train = np.load('X_train.npy')
+    #   y_train = np.load('y_train.npy')
+    #   X_test  = np.load('X_test.npy')
+    #   y_test  = np.load('y_test.npy')
+
+    if all(os.path.exists(f) for f in ['X_train.npy', 'y_train.npy', 'X_test.npy', 'y_test.npy']):
+        X_train = np.load('X_train.npy')
+        y_train = np.load('y_train.npy')
+        X_test = np.load('X_test.npy')
+        y_test = np.load('y_test.npy')
+    else:
+        print("Please provide X_train.npy, y_train.npy, X_test.npy, y_test.npy in the working directory.")
+        print("Exiting without training.")
         raise SystemExit(0)
 
-    X_train = np.load('X_train.npy')
-    y_train = np.load('y_train.npy')
-    site_ids_train = np.load('site_ids_train.npy')
-    X_test = np.load('X_test.npy')
-    y_test = np.load('y_test.npy')
+    # Sanity checks
+    assert X_train.shape[1:] == (SEQ_LEN_10MIN, N_CHANNELS), "X_train shape mismatch"
+    assert y_train.shape[1:] == (HOUR_STEPS, N_TARGETS), "y_train shape mismatch"
+    assert X_test.shape[1:] == (SEQ_LEN_10MIN, N_CHANNELS), "X_test shape mismatch"
+    assert y_test.shape[1:] == (HOUR_STEPS, N_TARGETS), "y_test shape mismatch"
 
-    site_ids_test = None
-    if os.path.exists('site_ids_test.npy'):
-        site_ids_test = np.load('site_ids_test.npy')
+    # Train and evaluate
+    model = train_and_evaluate(X_train, y_train, X_test, y_test)
 
-    assert X_train.shape[1:] == (SEQ_LEN_10MIN, N_CHANNELS)
-    assert y_train.shape[1:] == (HOUR_STEPS, N_TARGETS)
-    assert site_ids_train.shape[0] == X_train.shape[0]
-    assert X_test.shape[1:] == (SEQ_LEN_10MIN, N_CHANNELS)
-    assert y_test.shape[1:] == (HOUR_STEPS, N_TARGETS)
-    if site_ids_test is not None:
-        assert site_ids_test.shape[0] == X_test.shape[0]
-
-    model = train_and_evaluate(X_train, y_train, site_ids_train, X_test, y_test, site_ids_test)
-
+    # Example: RH drift detection on a sample of test segments + overlap consensus
     alarms_per_segment = []
     for i in range(min(50, X_test.shape[0])):
         x = X_test[i]
-        sid = int(site_ids_test[i]) if site_ids_test is not None else -1
-        lag_map = load_lag_policy(LAG_POLICY_FILE) if APPLY_SITE_SPECIFIC_LAG else {}
-        if APPLY_SITE_SPECIFIC_LAG and lag_map:
-            x = apply_site_fixed_lag(x, sid, lag_map)
         y = y_test[i]
         res = rh_residuals(model, x, y)
         alarms = page_hinkley(res, delta=PH_DELTA, lam=PH_LAM, alpha=PH_ALPHA)
