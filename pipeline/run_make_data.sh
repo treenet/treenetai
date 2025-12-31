@@ -1,5 +1,5 @@
-python3 build_normalized_dataset_treenet.py \
-  --out_root /home/lukovic/data/treenet/outputs_yearly_one \
+python3 build_normalized_dataset_treenet_utc.py \
+  --out_root /home/lukovic/data/treenet/outputs_yearly \
   --metadata_pickle /storage/lukovic/Data/FORWARDS/treenet/server_data/metadata_all.pkl \
   --meteo_dir /storage/lukovic/Data/FORWARDS/treenet/meteo_data \
   --thermo_dir /storage/lukovic/Data/FORWARDS/treenet/server_data/thermometer_l1 \

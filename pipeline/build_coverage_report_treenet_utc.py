@@ -34,6 +34,50 @@ import typing as t
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+
+# =============================================================
+# Constants
+# =============================================================
+FREQ_10MIN = '10min'
+FREQ_HOURLY = '1h'
+
+
+# =============================================================
+# Create lists of sites to consider for training and testing 
+# =============================================================
+
+def create_site_lists():
+
+    # Path to your input CSV
+    INPUT_CSV = "sites.csv"
+
+    # Output paths
+    TRAIN_OUT = "train_sites.csv"
+    TEST_OUT = "test_sites.csv"
+
+    # Load the CSV
+    df = pd.read_csv(INPUT_CSV)
+
+    # Filter only country == "Switzerland"
+    df_ch = df[df["country"] == "Switzerland"].copy()
+
+    # Random 80/20 split (stratification optional if countries differ)
+    train_df, test_df = train_test_split(
+        df_ch,
+        test_size=0.2,
+        random_state=42,  # for reproducibility
+        shuffle=True
+    )
+
+    # Save only the site_id column
+    train_df[["site_id", "site_name", "site_xcor", "site_ycor", "site_altitude"]].to_csv(TRAIN_OUT, index=False)
+    test_df[["site_id", "site_name", "site_xcor", "site_ycor", "site_altitude"]].to_csv(TEST_OUT, index=False)
+
+    print(f"Train sites saved to: {TRAIN_OUT} ({len(train_df)} rows)")
+    print(f"Test sites saved to:  {TEST_OUT} ({len(test_df)} rows)")
+
+
 
 # =============================================================
 # UTC core helpers
@@ -78,7 +122,7 @@ def round_to_10min_utc(s: pd.Series) -> pd.Series:
     if getattr(s.index, 'tz', None) is None:
         raise ValueError('round_to_10min_utc expects a tz‑aware (UTC) index')
     s = s.tz_convert('UTC')
-    s.index = s.index.round('10min')
+    s.index = s.index.round(FREQ_10MIN)
     # If multiple points fall onto the same rounded bin, collapse by mean
     s = s[~s.index.duplicated(keep='mean')]
     return s
@@ -97,12 +141,12 @@ def bin_to_10min_utc(s: pd.Series, method: str = 'floor', how: str = 'mean') -> 
     """
     if method == 'floor':
         s = s.copy().tz_convert('UTC').sort_index()
-        s.index = s.index.floor('10min')
+        s.index = s.index.floor(FREQ_10MIN)
         return s[~s.index.duplicated(keep='mean')]
     elif method == 'resample':
         s = s.copy().tz_convert('UTC').sort_index()
         agg = {'mean': 'mean', 'median': 'median'}.get(how, 'mean')
-        return s.resample('10min', origin='start_day', label='left').agg(agg)
+        return s.resample(FREQ_10MIN, origin='start_day', label='left').agg(agg)
     else:
         raise ValueError("method must be 'floor' or 'resample'")
 
@@ -113,7 +157,7 @@ def make_year_10m_index_utc(year: int) -> pd.DatetimeIndex:
     """
     start = pd.Timestamp(f"{year}-01-01 00:00:00", tz='UTC')
     end   = pd.Timestamp(f"{year}-12-31 23:59:59", tz='UTC')
-    idx = pd.date_range(start=start, end=end, freq='10min')
+    idx = pd.date_range(start=start, end=end, freq=FREQ_10MIN)
     return strip_leap_days(idx)
 
 
@@ -123,7 +167,7 @@ def make_year_hourly_index_utc(year: int) -> pd.DatetimeIndex:
     """
     start = pd.Timestamp(f"{year}-01-01 00:00:00", tz='UTC')
     end   = pd.Timestamp(f"{year}-12-31 23:59:59", tz='UTC')
-    idx = pd.date_range(start=start, end=end, freq='1h')
+    idx = pd.date_range(start=start, end=end, freq=FREQ_HOURLY)
     return strip_leap_days(idx)
 
 # =============================================================
@@ -419,7 +463,7 @@ def compute_coverage_for_site_utc(
                 df = read_lm_frame_utc(sid, lm_dir, local_tz)
                 if stem_mode_delta:
                     df['value'] = df['value'].diff()
-                dfH = df.resample('1h').median().reindex(idxH)
+                dfH = df.resample(FREQ_HOURLY).median().reindex(idxH)
                 for col, label in [('temp', 'lm_temp'), ('rh', 'lm_rh'), ('value', 'lm_stem')]:
                     v = dfH[col].to_numpy(); cov = coverage_fraction_arr(v)
                     rows_instr.append({
