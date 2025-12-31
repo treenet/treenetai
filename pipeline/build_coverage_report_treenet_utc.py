@@ -270,7 +270,7 @@ def read_lm_frame_utc(series_id: int, lm_dir: str, local_tz: str) -> pd.DataFram
     """Read a **LM dendrometer** frame and return a **UTC** frame with columns `value`, `temp`, `rh`.
     Missing columns are added as NaN if absent.
     """
-    pattern = re.compile(rf'dendrometer_lm_series_id_{series_id}\.ftr$')
+    pattern = re.compile(rf'dendrometer_lm_hourly_series_id_{series_id}\.ftr$')
     matches = [fn for fn in os.listdir(lm_dir) if pattern.match(fn)]
     if not matches:
         raise FileNotFoundError(f"LM series {series_id} not found in {lm_dir}")
