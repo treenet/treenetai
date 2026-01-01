@@ -156,45 +156,70 @@ def read_feather_series_utc(series_id: int, dir_path: str, local_tz: str,
     return s
 
 
+
 def read_lm_hourly_frame_utc(series_id: int, lm_dir: str, local_tz: str) -> pd.DataFrame:
-    """Prefer hourly LM file; else resample raw LM to hourly."""
-    pat_hour = re.compile(rf'dendrometer_lm_hourly_series_id_{series_id}\.ftr$')
-    pat_raw  = re.compile(rf'dendrometer_lm_series_id_{series_id}\.ftr$')
+    """
+    Simple & fast LM reader (RAW only) → hourly UTC by selecting exact local HH:00 rows.
 
-    matches_hour = [fn for fn in os.listdir(lm_dir) if pat_hour.match(fn)]
-    if matches_hour:
-        df = pd.read_feather(os.path.join(lm_dir, matches_hour[0]))
-        ts_col = 'ts' if 'ts' in df.columns else ('timestamp' if 'timestamp' in df.columns else None)
-        if ts_col is None:
-            raise ValueError('LM hourly file missing timestamp')
-        ts = pd.to_datetime(df[ts_col], utc=False)
-        ts = ts.dt.tz_localize(local_tz) if getattr(ts.dt,'tz',None) is None else ts.dt.tz_convert(local_tz)
-        ts = ts.dt.tz_convert('UTC')
-        df = df.set_index(ts)
-        stem = df['value'] if 'value' in df.columns else df.get('stem', pd.Series(np.nan, index=df.index))
-        temp = df['temp'] if 'temp' in df.columns else df.get('local_T', pd.Series(np.nan, index=df.index))
-        rh   = df['rh']   if 'rh'   in df.columns else df.get('local_RH', pd.Series(np.nan, index=df.index))
-        out = pd.DataFrame({'stem': stem, 'local_T': temp, 'local_RH': rh}).sort_index()
-        if pd.infer_freq(out.index) != 'H':
-            out = out.resample(FREQ_1H, origin='start_day', label='left').median()
-        return out
+    Behavior:
+    - Read RAW LM (10-min): 'value' (stem) 10-min grid; 'temp' and 'rh' present at hourly marks.
+    - Convert timestamps to local time (e.g., Europe/Zurich) and **keep only rows at HH:00:00**.
+    - Reindex to a continuous local hourly index from span start to end (to fill missing hours with NaN).
+    - Convert the final local hourly index to UTC and rename columns to canonical ['stem','local_T','local_RH'].
+    """
+    import os, re
+    import numpy as np
+    import pandas as pd
 
+    # RAW file only
+    pat_raw = re.compile(rf'dendrometer_lm_series_id_{series_id}\.ftr$')
     matches_raw = [fn for fn in os.listdir(lm_dir) if pat_raw.match(fn)]
     if not matches_raw:
-        raise FileNotFoundError(f'LM file not found for series {series_id} in {lm_dir}')
+        raise FileNotFoundError(f'LM RAW file not found for series {series_id} in {lm_dir}')
+
     df = pd.read_feather(os.path.join(lm_dir, matches_raw[0]))
+
+    # Timestamp column
     ts_col = 'ts' if 'ts' in df.columns else ('timestamp' if 'timestamp' in df.columns else None)
     if ts_col is None:
-        raise ValueError('LM file missing timestamp')
-    ts = pd.to_datetime(df[ts_col], utc=False)
-    ts = ts.dt.tz_localize(local_tz) if getattr(ts.dt,'tz',None) is None else ts.dt.tz_convert(local_tz)
-    ts = ts.dt.tz_convert('UTC')
-    df = df.set_index(ts)
-    for col in ['value','temp','rh']:
-        if col not in df.columns:
-            df[col] = np.nan
-    out = df[['value','temp','rh']].sort_index().resample(FREQ_1H, origin='start_day', label='left').median()
-    out.columns = ['stem','local_T','local_RH']
+        raise ValueError('LM raw file missing timestamp column')
+
+    # Localize to site timezone
+    ts_local = pd.to_datetime(df[ts_col], utc=False)
+    ts_local = ts_local.dt.tz_localize(local_tz) if getattr(ts_local.dt, 'tz', None) is None else ts_local.dt.tz_convert(local_tz)
+
+    df_local = df.copy()
+    df_local.index = ts_local
+
+    # Ensure columns exist
+    for col in ['value', 'temp', 'rh']:
+        if col not in df_local.columns:
+            df_local[col] = np.nan
+
+    # Keep only exact local HH:00 rows
+    hh00_mask = (df_local.index.minute == 0) & (df_local.index.second == 0)
+    df_hourly_local = df_local.loc[hh00_mask, ['value', 'temp', 'rh']].sort_index()
+
+    if df_hourly_local.empty:
+        # Return empty hourly frame; builder will handle reindex/diagnostics
+        return pd.DataFrame(columns=['stem','local_T','local_RH'])
+
+    # Continuous local hourly index
+    start_local = df_hourly_local.index.min()
+    end_local   = df_hourly_local.index.max()
+    idx_hour_local = pd.date_range(start_local, end_local, freq='1h')
+
+    # Reindex to continuous local hours
+    df_hourly_local = df_hourly_local.reindex(idx_hour_local)
+
+    # Convert to UTC
+    idx_hour_utc = df_hourly_local.index.tz_convert('UTC')
+    out = pd.DataFrame({
+        'stem':    df_hourly_local['value'].to_numpy(),
+        'local_T': df_hourly_local['temp'].to_numpy(),
+        'local_RH':df_hourly_local['rh'].to_numpy(),
+    }, index=idx_hour_utc).sort_index()
+
     return out
 
 

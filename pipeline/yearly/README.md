@@ -29,7 +29,7 @@ flowchart LR
     TH[thermometer_l1_*]
     HY[hygrometer_l1_*]
     D2[dendrometer_l2_*]
-    LM[dendrometer_lm_hourly_* or dendrometer_lm_*]
+    LM[ or dendrometer_lm_*]
     META[metadata_all.pkl]
   end
   subgraph Processing
@@ -205,7 +205,7 @@ For each `YYYY` in `--years`, the window is:
 ## 🎯 LM Target Pairing (per‑dendrometer‑ID)
 
 - LM series ID must match the L2 dendrometer `series_id`.
-- Preferred hourly file: `dendrometer_lm_hourly_series_id_<id>.ftr`.
+- Preferred hourly file: `_series_id_<id>.ftr`.
 - Fallback: `dendrometer_lm_series_id_<id>.ftr` (10‑min) → resampled to 1h UTC.
 
 LM target channels: `['stem', 'local_T', 'local_RH']`.
@@ -301,3 +301,45 @@ print(len(lm['2019-01-01':'2019-12-31']))
 - Use lowercase frequencies (`'10min'`, `'1h'`) to satisfy modern pandas.
 
 If you want a paper‑quality Strategy‑B figure or per‑site/year best‑ID caching to accelerate selection, open an issue or ping the maintainer.
+
+
+---
+
+## ⚙️ CLI Parameters (Complete)
+
+Below is the full list of command-line parameters supported by `build_normalized_dataset_treenet_utc.py`, their types, defaults, and usage.
+
+- `--out_root` *(str, required)*: Root output directory where arrays, identifiers, normalizers, and diagnostics are written.
+- `--metadata_pickle` *(str, required)*: Path to the metadata pickle containing instrument/site information.
+- `--meteo_dir` *(str, required)*: Directory with daily civil global meteorology CSVs (`tas`, `tasmin`, `tasmax`, `rh`, `vpd`, `gh`, `pr`).
+- `--thermo_dir` *(str, required)*: Directory containing thermometer local series (`thermometer_l1_series_id_<id>.ftr`).
+- `--hygro_dir` *(str, required)*: Directory containing hygrometer local series (`hygrometer_l1_series_id_<id>.ftr`).
+- `--dendro_l2_dir` *(str, required)*: Directory containing dendrometer L2 local series (`dendrometer_l2_series_id_<id>.ftr`).
+- `--dendro_lm_dir` *(str, required)*: Directory containing **RAW LM** files (`dendrometer_lm_series_id_<id>.ftr`).
+- `--train_site_ids_csv` *(str, required)*: CSV with a `site_id` column, listing sites for training.
+- `--test_site_ids_csv` *(str, optional)*: CSV with a `site_id` column, listing sites for testing.
+- `--years` *(int list, required)*: One or more years (e.g., `2019 2020`) forming the master UTC grid.
+- `--per_year` *(str, default: `true`)*: If `true`, fit global scalers per year; if `false`, fit once for all years.
+- `--tz` *(str, default: `Europe/Zurich`)*: Local timezone used for civil-day mapping and LM HH:00 selection.
+- `--require_complete_locals` *(str, default: `false`)*: If `true`, enforce complete locals in discovery/selection.
+- `--stem_mode` *(str, default: `absolute`)*: `absolute` or `delta`, applied to L2 stem inputs (targets are never differenced).
+- `--input_mode` *(str, default: `combinations`)*: `best`, `combinations`, or `pooled` (site-instrument selection strategy).
+- `--max_combos_per_site` *(int, default: None)*: Caps the number of (T,RH) pairs per site in `combinations` mode.
+- `--min_local_coverage` *(float, default: `0.7`)*: Coverage gate for locals (fraction of non-NaNs in window).
+- `--min_lm_series` *(int, default: `1`)*: Minimum LM series per site (kept for compatibility; LM reading is per-ID).
+- `--overlap_days` *(int, default: `10`)*: Overlap used only for calendar-year windows (kept for compatibility).
+- `--allow_missing_locals` *(str, default: `false`)*: If `true`, allow substituting **inputs** T/RH from globals; stem must pass.
+- `--globals_broadcast_strategy` *(str, default: `civil_map`)*: Strategy-B civil-day mapping to UTC 10-min grid (only option).
+- `--run_tests` *(flag)*: Runs a small Strategy-B self-test and exits.
+- `--window_days` *(int, default: `365`)*: Window length in days. Use `30` for 30-day segments.
+- `--window_stride_days` *(int, default: `1`)*: Stride in days for sliding windows (e.g., 1-day stride for 30-day windows).
+- `--complete_only` *(str, default: `false`)*: If `true` **and** `window_days < 365`, enforce strict local completeness (no NaNs in inputs/targets). Year-long windows ignore this flag.
+
+### Output file naming (by window length)
+When `--window_days` is used, array and identifier filenames include the window length suffix:
+- Train arrays: `X_train_<window_days>d.npy`, `y_train_<window_days>d.npy`, `site_ids_train_<window_days>d.npy`
+- Train identifiers: `train_identifiers_<window_days>d.csv`
+- Test arrays: `X_test_<window_days>d.npy`, `y_test_<window_days>d.npy`, `site_ids_test_<window_days>d.npy`
+- Test identifiers: `test_identifiers_<window_days>d.csv`
+
+Examples: `X_train_30d.npy`, `y_train_365d.npy`.

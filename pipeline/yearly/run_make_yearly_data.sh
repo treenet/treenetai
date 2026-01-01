@@ -1,0 +1,20 @@
+python3 build_normalized_dataset_treenet_utc.py \
+  --out_root /home/lukovic/data/treenet/outputs_yearly \
+  --metadata_pickle /storage/lukovic/Data/FORWARDS/treenet/server_data/metadata_all.pkl \
+  --meteo_dir /storage/lukovic/Data/FORWARDS/treenet/meteo_data \
+  --thermo_dir /storage/lukovic/Data/FORWARDS/treenet/server_data/thermometer_l1 \
+  --hygro_dir  /storage/lukovic/Data/FORWARDS/treenet/server_data/hygrometer_l1 \
+  --dendro_l2_dir /storage/lukovic/Data/FORWARDS/treenet/server_data/dendrometer_l2 \
+  --dendro_lm_dir /storage/lukovic/Data/FORWARDS/treenet/server_data/dendrometer_lm \
+  --train_site_ids_csv /home/lukovic/data/treenet/train_sites_temp.csv \
+  --test_site_ids_csv /home/lukovic/data/treenet/test_sites_temp.csv \
+  --years 2019 \
+  --per_year true \
+  --tz Europe/Zurich \
+  --stem_mode absolute \
+  --input_mode best \
+  --max_combos_per_site 3 \
+  --min_local_coverage 0.50 \
+  --overlap_days 10 \
+  --allow_missing_locals false \
+
