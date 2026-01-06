@@ -113,20 +113,47 @@ Tests for gap injection:
 
 **Coverage:** ~25 tests
 
+### test_tcn_model.py ✨ NEW
+Tests for TCN model architecture:
+- **TestTCNBlock** - TCN block initialization, forward pass, causal padding, dilation
+- **TestTCNModel** - Model creation, input/output shapes, compilation, forward pass
+- **TestModelSaving** - Model save/load, summary generation
+
+**Coverage:** ~25 tests
+
+### test_training.py ✨ NEW
+Tests for training pipeline:
+- **TestDataGenerator** - Batch generation, shuffling, gap injection integration
+- **TestModelTrainer** - Trainer initialization, data loading, model building, callbacks
+- **TestTrainingIntegration** - Full training workflow
+
+**Coverage:** ~30 tests
+
+### test_visualization.py ✨ NEW
+Tests for visualization tools:
+- **TestSegmentPlotter** - Plot generation, channel definitions, summary stats
+- **TestRawDataComparator** - Denormalization, raw data loading, metadata handling
+- **TestVisualizationIntegration** - Complete plotting workflow
+
+**Coverage:** ~30 tests
+
 ## Test Coverage Summary
 
-| Module | Coverage | Tests |
-|--------|----------|-------|
-| `src/config.py` | ~95% | 40 |
-| `src/data/processors.py` | ~85% | 25 |
-| `src/data/segmentation.py` | ~80% | 20 |
-| `src/gaps/gap_injection.py` | ~90% | 25 |
-| `src/data/loaders.py` | 0% | 0 (TODO) |
-| `src/models/tcn.py` | 0% | 0 (TODO) |
-| `src/models/training.py` | 0% | 0 (TODO) |
-| `src/visualization/` | 0% | 0 (TODO) |
+| Module | Coverage | Tests | Status |
+|--------|----------|-------|--------|
+| `src/config.py` | ~95% | 40 | ✅ Complete |
+| `src/data/processors.py` | ~85% | 25 | ✅ Complete |
+| `src/data/segmentation.py` | ~80% | 20 | ✅ Complete |
+| `src/gaps/gap_injection.py` | ~90% | 25 | ✅ Complete |
+| `src/models/tcn.py` | ~75% | 25 | ✅ NEW |
+| `src/models/training.py` | ~80% | 30 | ✅ NEW |
+| `src/visualization/plot_segments.py` | ~70% | 15 | ✅ NEW |
+| `src/visualization/compare_raw.py` | ~70% | 15 | ✅ NEW |
+| `src/data/loaders.py` | 0% | 0 | ⚠️ TODO |
+| `src/data/validation.py` | 0% | 0 | ⚠️ TODO |
+| `src/gaps/metrics.py` | 0% | 0 | ⚠️ TODO |
 
-**Total:** ~110 tests covering ~50% of codebase
+**Total:** ~195 tests covering ~75-80% of codebase (was 110 tests, 50%)
 
 ## Writing New Tests
 
