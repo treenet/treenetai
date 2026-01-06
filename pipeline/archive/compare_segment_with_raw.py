@@ -290,7 +290,7 @@ def main():
     p.add_argument('--out_root', required=True)
     p.add_argument('--raw_root', required=True)
     p.add_argument('--year', type=int, required=True)
-    p.add_argument('--site_id', type:int, required=True)
+    p.add_argument('--site_id', type=int, required=True)
     p.add_argument('--split', choices=['TRAIN','TEST'], required=True)
     p.add_argument('--combo_id', type=int, required=True)
     p.add_argument('--seg_idx', type=int, default=None, help='Segment index to process (use with single mode)')

@@ -1,4 +1,4 @@
-python3 build_30day_dropin_utc.py \
+python3 1_make_segments_from_raw_data.py \
   --out_root /home/lukovic/data/treenet/outputs_30d \
   --metadata_pickle /storage/lukovic/Data/FORWARDS/treenet/server_data/metadata_all.pkl \
   --meteo_dir       /storage/lukovic/Data/FORWARDS/treenet/meteo_data \
