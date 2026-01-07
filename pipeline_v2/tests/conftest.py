@@ -6,6 +6,21 @@ import pandas as pd
 from pathlib import Path
 import tempfile
 import shutil
+from src.config import (
+    DataPaths,
+    SegmentConfig,
+    DataConfig,
+    GapConfig,
+    ModelConfig,
+    PreprocessingConfig,
+    PipelineConfig
+)
+
+
+@pytest.fixture
+def sample_config():
+    """Create sample pipeline configuration for testing."""
+    return PipelineConfig()
 
 
 @pytest.fixture

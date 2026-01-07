@@ -303,14 +303,16 @@ class TestModelTrainer:
     
     def test_train_single_epoch(self, sample_config, tmp_path):
         """Test training for a single epoch (integration test)."""
-        # Create small dataset
+        # Create small dataset with correct shape (30 days at 10-min = 4320 timesteps)
         data_dir = tmp_path / "data"
         data_dir.mkdir()
         
-        X_train = np.random.randn(8, 720, 11).astype(np.float32)
-        y_train = np.random.randn(8, 120, 3).astype(np.float32)
-        X_test = np.random.randn(2, 720, 11).astype(np.float32)
-        y_test = np.random.randn(2, 120, 3).astype(np.float32)
+        # 30 days * 144 steps/day = 4320 timesteps input
+        # 30 days * 24 hours/day = 720 timesteps output
+        X_train = np.random.randn(8, 4320, 11).astype(np.float32)
+        y_train = np.random.randn(8, 720, 3).astype(np.float32)
+        X_test = np.random.randn(2, 4320, 11).astype(np.float32)
+        y_test = np.random.randn(2, 720, 3).astype(np.float32)
         
         with open(data_dir / 'train_input_segments_numpy.pkl', 'wb') as f:
             pickle.dump(X_train, f)

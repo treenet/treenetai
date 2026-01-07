@@ -380,19 +380,40 @@ class ModelTrainer:
         
         return all_metrics
     
-    def save_results(self, metrics: Dict):
-        """
-        Save training results and configuration.
+    def save_training_history(self):
+        """Save training history to JSON file."""
+        if self.history is None:
+            print("Warning: No training history to save")
+            return
         
-        Args:
-            metrics: Dictionary of evaluation metrics
-        """
-        # Save metrics
-        metrics_path = self.output_dir / 'evaluation_metrics.json'
-        with open(metrics_path, 'w') as f:
-            json.dump(metrics, f, indent=2)
+        history_path = self.output_dir / 'training_history.json'
         
-        # Save config
+        # Convert numpy types to Python types for JSON serialization
+        history_dict = {}
+        if hasattr(self.history, 'history'):
+            # Keras History object
+            history_dict = self.history.history
+        elif isinstance(self.history, dict):
+            # Already a dictionary
+            history_dict = self.history
+        
+        # Convert numpy arrays to lists
+        serializable_history = {}
+        for key, value in history_dict.items():
+            if hasattr(value, 'tolist'):
+                serializable_history[key] = value.tolist()
+            elif isinstance(value, list):
+                serializable_history[key] = value
+            else:
+                serializable_history[key] = [value]
+        
+        with open(history_path, 'w') as f:
+            json.dump(serializable_history, f, indent=2)
+        
+        print(f"Training history saved to: {history_path}")
+    
+    def save_config(self):
+        """Save configuration to JSON file."""
         config_path = self.output_dir / 'config.json'
         from dataclasses import asdict
         config_dict = asdict(self.config)
@@ -411,6 +432,23 @@ class ModelTrainer:
         
         with open(config_path, 'w') as f:
             json.dump(config_dict, f, indent=2)
+        
+        print(f"Configuration saved to: {config_path}")
+    
+    def save_results(self, metrics: Dict):
+        """
+        Save training results and configuration.
+        
+        Args:
+            metrics: Dictionary of evaluation metrics
+        """
+        # Save metrics
+        metrics_path = self.output_dir / 'evaluation_metrics.json'
+        with open(metrics_path, 'w') as f:
+            json.dump(metrics, f, indent=2)
+        
+        # Save config using save_config method
+        self.save_config()
         
         # Save final model
         final_model_path = self.output_dir / 'final_model.keras'
