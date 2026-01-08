@@ -315,8 +315,7 @@ class DataMerger:
         temp_df: pd.DataFrame,
         rh_df: pd.DataFrame,
         stem_df: pd.DataFrame,
-        meteo_daily: pd.DataFrame,
-        common_index: pd.DatetimeIndex
+        meteo_daily: pd.DataFrame
     ) -> pd.DataFrame:
         """
         Create complete input array with all 11 channels.
@@ -339,11 +338,13 @@ class DataMerger:
             rh_df: Local relative humidity data
             stem_df: Local stem radius change data
             meteo_daily: Global meteo data (daily)
-            common_index: Common 10-minute UTC index
             
         Returns:
             DataFrame with all 11 input channels
         """
+        # Find common timestamps across all local sensors
+        common_index = temp_df.index.intersection(rh_df.index).intersection(stem_df.index)
+        
         # Merge local sensors
         result = self.merge_local_sensors_10min(
             temp_df, rh_df, stem_df, common_index
@@ -359,20 +360,17 @@ class DataMerger:
     
     def create_target_array(
         self,
-        lm_df: pd.DataFrame,
-        hourly_index: pd.DatetimeIndex
+        lm_df: pd.DataFrame
     ) -> pd.DataFrame:
         """
         Create target array with 3 channels at hourly resolution.
         
         The LM data contains:
         - value: cleaned stem radius change (10-min)
-        - temp: cleaned temperature (hourly, NaN at 10-min)
-        - rh: cleaned relative humidity (hourly, NaN at 10-min)
+        - temp: cleaned temperature (10-min or hourly depending on sensor)
+        - rh: cleaned relative humidity (10-min or hourly, may be missing)
         
-        We need to:
-        1. Extract hourly temp and rh
-        2. Subsample stem to hourly
+        We need to subsample all to hourly (select rows where minute==0)
         
         Channels (in order):
         0. local_T (cleaned temperature, hourly)
@@ -381,35 +379,29 @@ class DataMerger:
         
         Args:
             lm_df: LM DataFrame with columns: value, temp, rh
-            hourly_index: Target hourly UTC index
             
         Returns:
             DataFrame with 3 target channels at hourly resolution
         """
-        result = pd.DataFrame(index=hourly_index)
+        # Subsample to hourly by selecting timestamps with minute==0
+        hourly_mask = lm_df.index.minute == 0
+        lm_hourly = lm_df.loc[hourly_mask].copy()
         
-        # Temperature: already hourly in LM data
-        if 'temp' in lm_df.columns:
-            # Drop NaN values (non-hourly entries)
-            temp_hourly = lm_df['temp'].dropna()
-            result['local_T'] = temp_hourly.reindex(hourly_index)
+        # Create result with proper column names
+        result = pd.DataFrame(index=lm_hourly.index)
+        
+        if 'temp' in lm_hourly.columns:
+            result['local_T'] = lm_hourly['temp']
         else:
             result['local_T'] = np.nan
         
-        # Relative humidity: already hourly in LM data
-        if 'rh' in lm_df.columns:
-            rh_hourly = lm_df['rh'].dropna()
-            result['local_RH'] = rh_hourly.reindex(hourly_index)
+        if 'rh' in lm_hourly.columns:
+            result['local_RH'] = lm_hourly['rh']
         else:
             result['local_RH'] = np.nan
         
-        # Stem: subsample from 10-min to hourly
-        if 'value' in lm_df.columns:
-            stem_hourly = self.resampler.resample_to_hourly(
-                lm_df[['value']].rename(columns={'value': 'stem'}),
-                method='subsample'
-            )
-            result['stem'] = stem_hourly['stem'].reindex(hourly_index)
+        if 'value' in lm_hourly.columns:
+            result['stem'] = lm_hourly['value']
         else:
             result['stem'] = np.nan
         
@@ -509,14 +501,16 @@ class DataProcessor:
     def process_sensor_dataframe(
         self, 
         df: pd.DataFrame,
-        value_col: str = 'value'
+        value_col: str = 'value',
+        keep_all_columns: bool = False
     ) -> pd.DataFrame:
         """
         Process a single sensor DataFrame: convert to UTC and resample.
         
         Args:
-            df: Raw sensor DataFrame with 'ts' and value column
-            value_col: Name of value column
+            df: Raw sensor DataFrame with 'ts' and value column(s)
+            value_col: Name of primary value column
+            keep_all_columns: If True, keep all numeric columns (for LM data)
             
         Returns:
             Processed DataFrame with UTC index and 10-min resolution
@@ -527,10 +521,20 @@ class DataProcessor:
         # Convert timestamps to UTC
         utc_index = self.ts_processor.to_utc_index(df['ts'])
         
-        # Create DataFrame with UTC index
-        result = pd.DataFrame({
-            value_col: pd.to_numeric(df[value_col], errors='coerce')
-        }, index=utc_index)
+        if keep_all_columns:
+            # Keep all numeric columns (for LM data: value, temp, rh)
+            numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+            # Remove 'series' if present
+            numeric_cols = [c for c in numeric_cols if c != 'series']
+            
+            result = pd.DataFrame(index=utc_index)
+            for col in numeric_cols:
+                result[col] = pd.to_numeric(df[col].values, errors='coerce')
+        else:
+            # Create DataFrame with UTC index (use .values to avoid index mismatch)
+            result = pd.DataFrame({
+                value_col: pd.to_numeric(df[value_col].values, errors='coerce')
+            }, index=utc_index)
         
         # Sort and remove duplicates
         result = result.sort_index()

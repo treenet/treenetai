@@ -50,11 +50,21 @@ class SegmentMetadata:
 
 class Normalizer:
     """
-    Handles year-level normalization for consistent scaling across segments.
+    Handles normalization for consistent scaling.
     
-    Normalization is done at the year level (not per-segment) to ensure
-    that all segments from the same year have consistent scales.
+    Supports two normalization scopes:
+    - 'year': Normalization at the year level for consistent scales across segments
+    - 'segment': Normalization per-segment for local adaptation (handles jumps better)
     """
+    
+    def __init__(self, norm_scope: str = 'year'):
+        """
+        Initialize normalizer.
+        
+        Args:
+            norm_scope: 'year' for year-level normalization, 'segment' for segment-level
+        """
+        self.norm_scope = norm_scope
     
     @staticmethod
     def compute_normalization_params(
@@ -204,92 +214,103 @@ class SegmentExtractor:
         self.steps_per_hour = steps_per_hour
         
         # Calculate steps
-        self.input_steps = segment_days * 24 * steps_per_hour  # 4320 for 30 days
-        self.output_steps = segment_days * 24  # 720 for 30 days (hourly)
-        self.stride_steps = stride_days * 24 * steps_per_hour  # 1440 for 10 days
+        self.input_steps = segment_days * 24 * steps_per_hour  # 4320 for 30 days (10-min resolution)
+        self.output_steps = segment_days * 24  # 720 for 30 days (hourly resolution)
+        self.stride_steps_output = stride_days * 24  # 240 for 10 days (hourly resolution)
+        self.stride_steps_input = stride_days * 24 * steps_per_hour  # 1440 for 10 days (10-min resolution)
     
     def find_complete_segments(
         self,
         input_df: pd.DataFrame,
         output_df: pd.DataFrame,
-        year: int
+        verbose: bool = False
     ) -> List[Tuple[pd.Timestamp, pd.Timestamp]]:
         """
-        Find all valid 30-day segments with complete coverage.
+        Find all valid 30-day segments with complete coverage from ALL available data.
         
-        This implements the "jump-ahead" algorithm:
-        1. Start at beginning of year
-        2. Check if next 30 days have complete data (no NaN)
-        3. If yes: accept segment, advance by stride
-        4. If no: find last NaN position, jump to next timestamp, try again
+        Algorithm (matching reference notebook):
+        1. Drop any NaN rows first
+        2. Iterate through output timestamps with stride
+        3. Check if segment_length timesteps ahead exists and spans exactly 30 days
+        4. Check if start/stop times exist in input
+        5. Check if input has exactly segment_length*6 samples between start/stop
         
         Args:
             input_df: Input DataFrame (10-minute resolution)
             output_df: Output DataFrame (hourly resolution)
-            year: Year to extract segments from
+            verbose: Print debug information
             
         Returns:
             List of (start_timestamp, end_timestamp) tuples for valid segments
         """
-        # Get year boundaries
-        year_start = pd.Timestamp(f'{year}-01-01 00:00:00', tz='UTC')
-        year_end = pd.Timestamp(f'{year}-12-31 23:50:00', tz='UTC')
+        # Drop NaN rows first (matching reference notebook)
+        input_clean = input_df.dropna()
+        output_clean = output_df.dropna()
+        
+        if verbose:
+            print(f"    Input: {len(input_df)} rows -> {len(input_clean)} after dropna()")
+            print(f"    Output: {len(output_df)} rows -> {len(output_clean)} after dropna()")
+        
+        if len(output_clean) == 0 or len(input_clean) == 0:
+            return []
         
         segments = []
-        current_start = year_start
+        idx = 0
+        idx_change = 1  # Initialize idx_change (reference algorithm behavior)
+        max_length = len(output_clean)
+        stride_length = self.stride_steps_output  # Use OUTPUT stride (240 for 10-day stride with hourly output)
         
-        while current_start <= year_end:
-            # Calculate candidate window end
-            candidate_end = current_start + pd.Timedelta(days=self.segment_days)
+        input_times = pd.DatetimeIndex(input_clean.index)
+        output_times = pd.DatetimeIndex(output_clean.index)
+        
+        checked_segments = 0
+        time_diff_failed = 0
+        input_missing_failed = 0
+        sample_count_failed = 0
+        
+        while (idx + self.output_steps) < max_length:
+            start_time = output_clean.iloc[idx].name  # Get timestamp from index
+            stop_time = output_clean.iloc[idx + self.output_steps].name
             
-            if candidate_end > year_end:
-                break  # Not enough data left for a full segment
+            checked_segments += 1
             
-            # Extract candidate windows
-            input_window = input_df.loc[current_start:candidate_end]
-            output_window = output_df.loc[current_start:candidate_end]
-            
-            # Check completeness
-            has_input_nans = input_window.isna().any().any()
-            has_output_nans = output_window.isna().any().any()
-            input_complete = len(input_window) == self.input_steps
-            output_complete = len(output_window) == self.output_steps
-            
-            if (not has_input_nans and not has_output_nans and 
-                input_complete and output_complete):
-                # Accept this segment
-                segments.append((current_start, candidate_end))
-                
-                # Advance by stride
-                current_start = current_start + pd.Timedelta(
-                    minutes=self.stride_steps * 10
-                )
-            else:
-                # Find last NaN position in either input or output
-                last_nan_idx = None
-                
-                if has_input_nans:
-                    # Find last NaN in input
-                    nan_mask = input_window.isna().any(axis=1)
-                    if nan_mask.any():
-                        last_nan_idx = nan_mask[nan_mask].index[-1]
-                
-                if has_output_nans:
-                    # Find last NaN in output
-                    nan_mask = output_window.isna().any(axis=1)
-                    if nan_mask.any():
-                        output_last_nan = nan_mask[nan_mask].index[-1]
-                        if last_nan_idx is None or output_last_nan > last_nan_idx:
-                            last_nan_idx = output_last_nan
-                
-                if last_nan_idx is not None:
-                    # Jump to next timestamp after last NaN
-                    current_start = last_nan_idx + pd.Timedelta(minutes=10)
+            # Check if time difference is exactly segment_days
+            if (stop_time - start_time) == pd.Timedelta(days=self.segment_days):
+                # Check if start and stop exist in input
+                if (start_time in input_times) and (stop_time in input_times):
+                    # Find input indices
+                    index_a = input_clean.index.get_loc(start_time)
+                    index_b = input_clean.index.get_loc(stop_time)
+                    
+                    actual_samples = index_b - index_a
+                    
+                    # Check if input segment has exactly the right number of samples
+                    if actual_samples == self.input_steps:
+                        segments.append((start_time, stop_time))
+                        idx_change = stride_length  # Advance by stride (240 steps for 10 days)
+                        if verbose and len(segments) <= 3:
+                            print(f"      Found segment {len(segments)}: {start_time} to {stop_time}")
+                    else:
+                        sample_count_failed += 1
+                        idx_change = 1  # Reset to single step
+                        if verbose and sample_count_failed <= 5:  # Show first 5 failures
+                            print(f"      Sample count mismatch: {start_time} to {stop_time}")
+                            print(f"        Expected: {self.input_steps}, Got: {actual_samples}")
                 else:
-                    # No NaN found, but wrong length - advance by stride
-                    current_start = current_start + pd.Timedelta(
-                        minutes=self.stride_steps * 10
-                    )
+                    input_missing_failed += 1
+                    idx_change = 1  # Reset to single step
+            else:
+                time_diff_failed += 1
+                idx_change = 1  # Reset to single step
+            
+            idx += idx_change
+        
+        if verbose:
+            print(f"    Checked {checked_segments} potential segments")
+            print(f"    Time diff failed: {time_diff_failed}")
+            print(f"    Input missing failed: {input_missing_failed}")
+            print(f"    Sample count failed: {sample_count_failed}")
+            print(f"    Valid segments: {len(segments)}")
         
         return segments
     
@@ -305,12 +326,15 @@ class SegmentExtractor:
         Args:
             df: Source DataFrame
             start: Start timestamp (inclusive)
-            end: End timestamp (inclusive)
+            end: End timestamp (exclusive - not included in output)
             
         Returns:
-            Segment DataFrame
+            Segment DataFrame with exactly the expected number of samples
         """
-        return df.loc[start:end].copy()
+        # Use iloc to get exclusive end behavior
+        start_idx = df.index.get_loc(start)
+        end_idx = df.index.get_loc(end)
+        return df.iloc[start_idx:end_idx].copy()
 
 
 class SegmentBuilder:
@@ -318,7 +342,7 @@ class SegmentBuilder:
     Main segment builder that orchestrates the entire segmentation process.
     
     This combines:
-    1. Year-level normalization
+    1. Normalization (year-level or segment-level)
     2. Segment extraction with completeness checking
     3. Metadata tracking
     """
@@ -327,7 +351,8 @@ class SegmentBuilder:
         self,
         segment_days: int = 30,
         stride_days: int = 10,
-        norm_method: str = 'minmax'
+        norm_method: str = 'minmax',
+        norm_scope: str = 'year'
     ):
         """
         Initialize segment builder.
@@ -336,12 +361,14 @@ class SegmentBuilder:
             segment_days: Length of segments in days
             stride_days: Stride for overlapping segments
             norm_method: Normalization method ('minmax' or 'zscore')
+            norm_scope: Normalization scope ('year' or 'segment')
         """
         self.segment_days = segment_days
         self.stride_days = stride_days
         self.norm_method = norm_method
+        self.norm_scope = norm_scope
         
-        self.normalizer = Normalizer()
+        self.normalizer = Normalizer(norm_scope=norm_scope)
         self.extractor = SegmentExtractor(segment_days, stride_days)
     
     def build_segments_for_combination(
@@ -353,19 +380,24 @@ class SegmentBuilder:
         dendrometer_id: int,
         input_df: pd.DataFrame,
         output_df: pd.DataFrame,
-        year: int,
         input_channels: List[str],
         target_channels: List[str]
     ) -> Tuple[List[pd.DataFrame], List[pd.DataFrame], List[SegmentMetadata]]:
         """
         Build normalized segments for a single sensor combination.
         
-        Process:
-        1. Compute year-level normalization parameters
-        2. Normalize the full year data
-        3. Find valid 30-day windows
+        Process (year-level normalization):
+        1. Compute normalization parameters from all available data
+        2. Normalize the full data
+        3. Find valid segments (complete 30-day windows)
         4. Extract segments
         5. Create metadata for each segment
+        
+        Process (segment-level normalization):
+        1. Find valid segments (complete 30-day windows) from raw data
+        2. Extract raw segments
+        3. Normalize each segment individually
+        4. Store segment-specific normalization parameters in metadata
         
         Args:
             combo_id: Unique combination ID
@@ -373,9 +405,8 @@ class SegmentBuilder:
             thermometer_id: Thermometer series ID
             hygrometer_id: Hygrometer series ID
             dendrometer_id: Dendrometer series ID
-            input_df: Full-year input DataFrame (10-min, 11 channels)
-            output_df: Full-year output DataFrame (hourly, 3 channels)
-            year: Year being processed
+            input_df: Full input DataFrame (10-min, 11 channels)
+            output_df: Full output DataFrame (hourly, 3 channels)
             input_channels: List of input channel names
             target_channels: List of target channel names
             
@@ -385,62 +416,124 @@ class SegmentBuilder:
             - List of output segment DataFrames
             - List of SegmentMetadata objects
         """
-        # 1. Compute year-level normalization parameters
-        input_min, input_diff = self.normalizer.compute_normalization_params(
-            input_df, self.norm_method
-        )
-        output_min, output_diff = self.normalizer.compute_normalization_params(
-            output_df, self.norm_method
-        )
-        
-        # 2. Normalize full-year data
-        input_normalized = self.normalizer.normalize(
-            input_df, input_min, input_diff
-        )
-        output_normalized = self.normalizer.normalize(
-            output_df, output_min, output_diff
-        )
-        
-        # 3. Find valid segments
-        segment_windows = self.extractor.find_complete_segments(
-            input_normalized, output_normalized, year
-        )
-        
-        # 4. Extract segments and create metadata
         input_segments = []
         output_segments = []
         metadata_list = []
         
-        for seg_idx, (start, end) in enumerate(segment_windows):
-            # Extract segments
-            input_seg = self.extractor.extract_segment(
-                input_normalized, start, end
+        if self.norm_scope == 'year':
+            # Year-level normalization (original approach)
+            # 1. Compute normalization parameters from all available data
+            input_min, input_diff = self.normalizer.compute_normalization_params(
+                input_df, self.norm_method
             )
-            output_seg = self.extractor.extract_segment(
-                output_normalized, start, end
-            )
-            
-            # Create metadata
-            metadata = SegmentMetadata(
-                combo_id=combo_id,
-                segment_idx=seg_idx,
-                site_id=site_id,
-                thermometer_id=thermometer_id,
-                hygrometer_id=hygrometer_id,
-                dendrometer_id=dendrometer_id,
-                window_start_utc=start,
-                window_end_utc=end,
-                input_min=input_min,
-                input_diff=input_diff,
-                output_min=output_min,
-                output_diff=output_diff,
-                input_channels=input_channels,
-                target_channels=target_channels
+            output_min, output_diff = self.normalizer.compute_normalization_params(
+                output_df, self.norm_method
             )
             
-            input_segments.append(input_seg)
-            output_segments.append(output_seg)
-            metadata_list.append(metadata)
+            # 2. Normalize full data
+            input_normalized = self.normalizer.normalize(
+                input_df, input_min, input_diff
+            )
+            output_normalized = self.normalizer.normalize(
+                output_df, output_min, output_diff
+            )
+            
+            # 3. Find valid segments
+            segment_windows = self.extractor.find_complete_segments(
+                input_normalized, output_normalized, verbose=False
+            )
+            
+            # 4. Extract segments and create metadata
+            for seg_idx, (start, end) in enumerate(segment_windows):
+                # Extract segments
+                input_seg = self.extractor.extract_segment(
+                    input_normalized, start, end
+                )
+                output_seg = self.extractor.extract_segment(
+                    output_normalized, start, end
+                )
+                
+                # Create metadata with year-level normalization params
+                metadata = SegmentMetadata(
+                    combo_id=combo_id,
+                    segment_idx=seg_idx,
+                    site_id=site_id,
+                    thermometer_id=thermometer_id,
+                    hygrometer_id=hygrometer_id,
+                    dendrometer_id=dendrometer_id,
+                    window_start_utc=start,
+                    window_end_utc=end,
+                    input_min=input_min,
+                    input_diff=input_diff,
+                    output_min=output_min,
+                    output_diff=output_diff,
+                    input_channels=input_channels,
+                    target_channels=target_channels
+                )
+                
+                input_segments.append(input_seg)
+                output_segments.append(output_seg)
+                metadata_list.append(metadata)
+        
+        elif self.norm_scope == 'segment':
+            # Segment-level normalization (new approach)
+            # 1. Find valid segments from raw (non-normalized) data
+            segment_windows = self.extractor.find_complete_segments(
+                input_df, output_df, verbose=False
+            )
+            
+            # 2. Extract and normalize each segment individually
+            for seg_idx, (start, end) in enumerate(segment_windows):
+                # Extract raw segments
+                input_seg_raw = self.extractor.extract_segment(
+                    input_df, start, end
+                )
+                output_seg_raw = self.extractor.extract_segment(
+                    output_df, start, end
+                )
+                
+                # Compute segment-specific normalization parameters
+                input_min, input_diff = self.normalizer.compute_normalization_params(
+                    input_seg_raw, self.norm_method
+                )
+                output_min, output_diff = self.normalizer.compute_normalization_params(
+                    output_seg_raw, self.norm_method
+                )
+                
+                # Normalize this segment
+                input_seg = self.normalizer.normalize(
+                    input_seg_raw, input_min, input_diff
+                )
+                output_seg = self.normalizer.normalize(
+                    output_seg_raw, output_min, output_diff
+                )
+                
+                # Create metadata with segment-specific normalization params
+                metadata = SegmentMetadata(
+                    combo_id=combo_id,
+                    segment_idx=seg_idx,
+                    site_id=site_id,
+                    thermometer_id=thermometer_id,
+                    hygrometer_id=hygrometer_id,
+                    dendrometer_id=dendrometer_id,
+                    window_start_utc=start,
+                    window_end_utc=end,
+                    input_min=input_min,
+                    input_diff=input_diff,
+                    output_min=output_min,
+                    output_diff=output_diff,
+                    input_channels=input_channels,
+                    target_channels=target_channels
+                )
+                
+                input_segments.append(input_seg)
+                output_segments.append(output_seg)
+                metadata_list.append(metadata)
+        
+        else:
+            raise ValueError(f"Unknown norm_scope: {self.norm_scope}. Must be 'year' or 'segment'")
+        
+        return input_segments, output_segments, metadata_list
         
         return input_segments, output_segments, metadata_list
     
