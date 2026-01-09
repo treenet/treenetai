@@ -13,12 +13,14 @@ This script:
 Usage:
     python 1_build_segments.py --config configs/default.yaml
     python 1_build_segments.py --year 2020 --test-ratio 0.2
+    python 1_build_segments.py --run-name processed_v3 --country Switzerland
 """
 
 import argparse
 import sys
 import os
 from pathlib import Path
+from datetime import datetime
 import pandas as pd
 import numpy as np
 from itertools import product
@@ -55,7 +57,13 @@ def parse_args():
         '--output-root',
         type=str,
         default='/storage/lukovic/Data/FORWARDS/treenet/processed',
-        help='Output directory for processed segments'
+        help='Output directory root for processed segments'
+    )
+    parser.add_argument(
+        '--run-name',
+        type=str,
+        default=None,
+        help='Name for this run (creates output subdirectory). Default: processed_YYYYMMDD_HHMMSS'
     )
     parser.add_argument(
         '--country',
@@ -131,9 +139,28 @@ def main():
     """Main function."""
     args = parse_args()
     
-    # Setup logging
-    output_dir = ensure_dir(Path(args.output_root) / 'processed' / 'model_data')
-    log_file = output_dir.parent / 'segment_building.log'
+    # Generate run name if not specified
+    if args.run_name is None:
+        run_name = f"processed_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    else:
+        run_name = args.run_name
+    
+    # Setup output directory structure:
+    # output_root/
+    #   run_name/
+    #     logs/              <- log files
+    #     temp/              <- temporary files
+    #     model_data/        <- processed segments
+    #       intermediate_timeseries/
+    #       segments/
+    #       reports/
+    run_dir = ensure_dir(Path(args.output_root) / run_name)
+    log_dir = ensure_dir(run_dir / 'logs')
+    temp_dir = ensure_dir(run_dir / 'temp')
+    output_dir = ensure_dir(run_dir / 'model_data')
+    
+    # Setup logging to log file in run directory
+    log_file = log_dir / 'segment_building.log'
     setup_logging(verbose=args.verbose, log_file=log_file)
     
     # Determine country filter
@@ -142,6 +169,8 @@ def main():
     print("="*80)
     print("TreeNet AI Pipeline v2 - Segment Building")
     print("="*80)
+    print(f"Run name: {run_name}")
+    print(f"Output directory: {run_dir}")
     print(f"Segment length: {args.segment_days} days, Stride: {args.stride_days} days")
     print(f"Normalization scope: {args.norm_scope}")
     print(f"Country filter: {args.country}")
@@ -163,7 +192,7 @@ def main():
     
     # Initialize report collector
     report_collector = BuildReportCollector(
-        output_root=args.output_root,
+        output_root=str(run_dir),
         country_filter=args.country,
         segment_days=args.segment_days,
         stride_days=args.stride_days,
@@ -324,13 +353,34 @@ def main():
                     f"{split_name}_output_site{site_id}_T{thermo_id}_H{hygro_id}_D{dendro_id}.ftr")
                 
                 # Save with index as column (matching reference format)
-                input_save = input_df.reset_index()
-                input_save.rename(columns={'index': 'ts'}, inplace=True)
-                input_save.to_feather(input_ts_path)
-                
-                output_save = output_df.reset_index()
-                output_save.rename(columns={'index': 'ts'}, inplace=True)
-                output_save.to_feather(output_ts_path)
+                # Includes verification to catch NFS silent failures
+                try:
+                    input_save = input_df.reset_index()
+                    input_save.rename(columns={'index': 'ts'}, inplace=True)
+                    input_save.to_feather(input_ts_path)
+                    
+                    output_save = output_df.reset_index()
+                    output_save.rename(columns={'index': 'ts'}, inplace=True)
+                    output_save.to_feather(output_ts_path)
+                    
+                    # Verify files were actually written (catches NFS silent failures)
+                    input_exists = os.path.exists(input_ts_path)
+                    output_exists = os.path.exists(output_ts_path)
+                    input_size = os.path.getsize(input_ts_path) if input_exists else 0
+                    output_size = os.path.getsize(output_ts_path) if output_exists else 0
+                    
+                    if not input_exists or not output_exists or input_size == 0 or output_size == 0:
+                        print(f"      WARNING: File verification failed!")
+                        print(f"        Input: exists={input_exists}, size={input_size}")
+                        print(f"        Output: exists={output_exists}, size={output_size}")
+                    elif args.verbose:
+                        print(f"        Saved: {os.path.basename(input_ts_path)} ({input_size:,} bytes)")
+                        
+                except Exception as e:
+                    print(f"      ERROR saving intermediate files: {e}")
+                    print(f"        Input path: {input_ts_path}")
+                    print(f"        Input shape: {input_df.shape if input_df is not None else 'None'}")
+                    print(f"        Output shape: {output_df.shape if output_df is not None else 'None'}")
                 
                 # Build segments from all available data (no year filtering)
                 input_segs, output_segs, seg_metadata = segment_builder.build_segments_for_combination(
