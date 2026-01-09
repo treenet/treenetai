@@ -303,7 +303,7 @@ intermediate_timeseries/{split}_output_site{site_id}_T{thermo_id}_H{hygro_id}_D{
 
 | Script | Purpose | Key Arguments |
 |--------|---------|---------------|
-| `1_build_segments.py` | Extract 30-day segments | `--country`, `--max-sites`, `--max-combinations` |
+| `1_build_segments.py` | Extract 30-day segments | `--country`, `--run-name`, `--max-sites`, `--max-combinations` |
 | `2_preprocess.py` | Prepare for training | |
 | `3_train_model.py` | Train TCN model | `--epochs`, `--batch-size` |
 | `4_evaluate_model.py` | Evaluate performance | |
@@ -312,15 +312,33 @@ intermediate_timeseries/{split}_output_site{site_id}_T{thermo_id}_H{hygro_id}_D{
 | `7_visualize_reconstruction.py` | Before/after plots | `--site-id` |
 
 ### Key Script: 1_build_segments.py
+
+#### Output Directory Structure
+The `--run-name` argument controls the output organization:
+```
+/storage/lukovic/Data/FORWARDS/treenet/processed/
+  {run_name}/
+    logs/              <- Log files (build_console.log, segment_building.log)
+    temp/              <- Temporary files
+    model_data/        <- Processed segments
+      intermediate_timeseries/   <- Full time series before segmentation
+      segments/                  <- 30-day segment files
+      reports/                   <- Build reports
+```
+
+#### Example Commands
 ```bash
-# Build with all Swiss sites (default behavior)
-python 1_build_segments.py --max-sites -1
+# Build with all Swiss sites (recommended)
+python 1_build_segments.py --run-name processed_full_swiss_v3 --country Switzerland --max-combinations -1
+
+# Quick test with limited combos
+python 1_build_segments.py --run-name test_run --max-sites 3 --max-combinations 5
 
 # Build with specific sites
-python 1_build_segments.py --force-sites 3,4,10
+python 1_build_segments.py --run-name specific_sites --force-sites 3,4,10
 
-# Build with all countries (not recommended)
-python 1_build_segments.py --country all
+# Build with verbose output (shows file saves)
+python 1_build_segments.py --run-name verbose_run --verbose
 ```
 
 ### Key Script: 6_reconstruct_timeseries.py
@@ -444,6 +462,51 @@ def process_meteo_daily(self, meteo_df: pd.DataFrame) -> pd.DataFrame:
 - Civil day: `2023-06-16` → Use meteo data for June 16th
 
 This ensures the meteo data reflects what the tree actually experienced on that local calendar day, not the UTC calendar day.
+
+---
+
+### Issue 5: NFS Silent Write Failures
+
+**Problem (Observed January 2025)**: During segment building, feather file writes to NFS storage (`/storage/lukovic/Data/FORWARDS/treenet/`) can silently fail. The `to_feather()` call appears to succeed (no exception raised) but files are not actually written to disk.
+
+**Symptoms**:
+1. Log shows processing continuing normally (combo numbers incrementing, segments found)
+2. Intermediate feather files stop being created at some point
+3. No error messages in output
+4. Process continues running at high CPU usage
+5. Memory usage grows as segments accumulate but files aren't saved
+
+**Root Cause (Hypothesis)**: NFS (Network File System) transient issues:
+- File handle exhaustion
+- Network hiccups causing silent write failures
+- Write caching issues where data is "cached" but never actually flushed to disk
+- Pandas/PyArrow's `to_feather()` doesn't always detect NFS-level failures
+
+**Solution Implemented**: File verification after each write:
+```python
+# In 1_build_segments.py
+try:
+    input_save.to_feather(input_ts_path)
+    output_save.to_feather(output_ts_path)
+    
+    # Verify files were actually written (catches NFS silent failures)
+    input_exists = os.path.exists(input_ts_path)
+    output_exists = os.path.exists(output_ts_path)
+    input_size = os.path.getsize(input_ts_path) if input_exists else 0
+    output_size = os.path.getsize(output_ts_path) if output_exists else 0
+    
+    if not input_exists or not output_exists or input_size == 0 or output_size == 0:
+        print(f"WARNING: File verification failed!")
+        # Details printed...
+except Exception as e:
+    print(f"ERROR saving intermediate files: {e}")
+```
+
+**Additional Best Practices**:
+1. Always store logs and temp files in the output directory (same NFS volume) to detect storage issues early
+2. Use `--run-name` to organize outputs into versioned directories
+3. Monitor combo count vs file count periodically during long runs
+4. If verification fails, restart the process (usually resolves transient NFS issues)
 
 ---
 
