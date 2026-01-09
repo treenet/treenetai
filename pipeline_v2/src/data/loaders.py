@@ -145,32 +145,44 @@ class DataLoaders:
         """
         Load gridded meteotest weather data for a site.
         
+        File naming convention: meteo_data_site_id_{SITE_ID}.csv
+        
         Args:
             site_id: Site ID
             
         Returns:
             DataFrame with columns: ts, tas, tasmax, tasmin, rh, vpd, gh, pr
-            Returns None if file not found.
+            Returns None if file not found or all values are NaN.
         """
-        # Try to find the file with site ID in name
-        pattern = f'*site_{site_id}.csv'
-        matches = list(self.meteo_root.glob(pattern))
+        # Primary naming convention: meteo_data_site_id_{site_id}.csv
+        file_path = self.meteo_root / f'meteo_data_site_id_{site_id}.csv'
         
-        if not matches:
-            # Try alternative pattern
-            pattern = f'*{site_id}*.csv'
+        if not file_path.exists():
+            # Fallback: try old naming convention site_{site_id}.csv
+            file_path = self.meteo_root / f'site_{site_id}.csv'
+            
+        if not file_path.exists():
+            # Try glob pattern as last resort
+            pattern = f'*site*{site_id}*.csv'
             matches = list(self.meteo_root.glob(pattern))
-        
-        if not matches:
-            return None
+            if not matches:
+                return None
+            file_path = matches[0]
         
         try:
-            df = pd.read_csv(matches[0])
+            df = pd.read_csv(file_path)
             # Ensure required columns exist
             required_cols = ['ts', 'tas', 'tasmax', 'tasmin', 'rh', 'vpd', 'gh', 'pr']
             for col in required_cols:
                 if col not in df.columns:
                     df[col] = np.nan
+            
+            # Check if data is valid (not all NaN)
+            # Non-Swiss sites have empty meteo files
+            data_cols = [c for c in required_cols if c != 'ts']
+            if df[data_cols].isna().all().all():
+                return None  # All values are NaN - invalid meteo data
+            
             return df[required_cols]
         except Exception as e:
             print(f"Error loading meteotest for site {site_id}: {e}")
@@ -270,12 +282,19 @@ class DataLoaders:
         
         return result
     
-    def get_sites_with_complete_data(self, metadata: pd.DataFrame) -> set[int]:
+    def get_sites_with_complete_data(
+        self, 
+        metadata: pd.DataFrame, 
+        country: Optional[str] = 'Switzerland'
+    ) -> set[int]:
         """
         Find sites that have at least one sensor of each required type.
         
         Args:
             metadata: Metadata DataFrame
+            country: Filter to sites in this country. 
+                     Default is 'Switzerland' (only Swiss sites have valid meteo data).
+                     Use None to include all countries.
             
         Returns:
             Set of site IDs with complete sensor coverage
@@ -284,6 +303,13 @@ class DataLoaders:
         
         for site_id in metadata['site_id'].unique():
             site_meta = metadata[metadata['site_id'] == site_id]
+            
+            # Filter by country if specified
+            if country is not None:
+                site_country = site_meta['country'].iloc[0] if 'country' in site_meta.columns else None
+                if site_country != country:
+                    continue
+            
             var_names = set(site_meta['variable_name'].unique())
             
             # Check if site has all three sensor types

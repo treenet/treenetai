@@ -1,5 +1,19 @@
 """
 Gap injection for training data augmentation.
+
+IMPORTANT: Gaps are ONLY injected into the first 3 channels (local sensor data):
+- Channel 0: temp_treenet (local air temperature)
+- Channel 1: rh_treenet (local relative humidity)  
+- Channel 2: stem (dendrometer stem radius change)
+
+Channels 3-10 (global meteo data) are NEVER gapped because:
+1. They represent clean, gap-free global meteorological data
+2. They serve as auxiliary information to help the model fill gaps
+3. Their coarse spatial/temporal resolution makes them reliable reference data
+4. Day-of-year (channel 10) provides critical temporal context
+
+The model learns to use correlations between local sensor data and global meteo
+data to reconstruct gaps in the local measurements.
 """
 
 from __future__ import annotations
@@ -7,12 +21,32 @@ from typing import Tuple, List, Optional
 import numpy as np
 
 
+# Channels that can have gaps injected (local sensor data only)
+GAPPABLE_CHANNELS = [0, 1, 2]  # temp_treenet, rh_treenet, stem
+
+# Channel descriptions for reference
+CHANNEL_NAMES = {
+    0: 'temp_treenet',   # Local air temperature (below canopy)
+    1: 'rh_treenet',     # Local relative humidity (below canopy)
+    2: 'stem',           # Dendrometer stem radius change
+    3: 'tas',            # Global mean air temperature (daily)
+    4: 'tasmax',         # Global max air temperature (daily)
+    5: 'tasmin',         # Global min air temperature (daily)
+    6: 'rh',             # Global relative humidity (daily)
+    7: 'vpd',            # Global vapor pressure deficit (daily)
+    8: 'gh',             # Global horizontal irradiance (daily)
+    9: 'pr',             # Global precipitation (daily)
+    10: 'doy',           # Day of year (1-365)
+}
+
+
 class GapInjector:
     """
     Injects synthetic gaps into time series data for training.
     
-    This simulates real-world missing data scenarios by randomly
-    masking sections of the input data during training.
+    CRITICAL: Gaps are ONLY injected into the first 3 channels (local sensor data).
+    Global meteo channels (3-10) are never gapped as they provide clean reference
+    data that helps the model learn to reconstruct local measurements.
     """
     
     def __init__(
@@ -22,7 +56,8 @@ class GapInjector:
         min_gaps_per_segment: int = 1,
         max_gaps_per_segment: int = 3,
         gap_channel_prob: float = 0.5,
-        random_seed: Optional[int] = 42
+        random_seed: Optional[int] = 42,
+        gappable_channels: Optional[List[int]] = None
     ):
         """
         Initialize gap injector.
@@ -32,14 +67,19 @@ class GapInjector:
             max_gap_days: Maximum gap length in days
             min_gaps_per_segment: Minimum number of gaps per segment
             max_gaps_per_segment: Maximum number of gaps per segment
-            gap_channel_prob: Probability of gapping each channel
+            gap_channel_prob: Probability of gapping each eligible channel
             random_seed: Random seed for reproducibility
+            gappable_channels: List of channel indices that can be gapped.
+                              Default is [0, 1, 2] (local sensor channels only).
         """
         self.min_gap_days = min_gap_days
         self.max_gap_days = max_gap_days
         self.min_gaps = min_gaps_per_segment
         self.max_gaps = max_gaps_per_segment
         self.gap_channel_prob = gap_channel_prob
+        
+        # Only allow gaps in local sensor channels by default
+        self.gappable_channels = gappable_channels if gappable_channels is not None else GAPPABLE_CHANNELS
         
         self.rng = np.random.default_rng(random_seed)
     
@@ -50,6 +90,9 @@ class GapInjector:
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Inject random gaps into a single segment.
+        
+        Gaps are ONLY injected into gappable channels (default: first 3 channels).
+        Global meteo channels are never modified.
         
         Gaps are created by:
         1. Setting values to 0
@@ -68,8 +111,9 @@ class GapInjector:
             >>> injector = GapInjector()
             >>> x = np.random.randn(4320, 11)  # 30 days, 11 channels
             >>> x_gapped, mask = injector.inject_gaps(x)
-            >>> np.sum(mask == 0)  # Number of masked values
-            2880  # Example: 2 days in one channel
+            >>> # Gaps only in channels 0, 1, 2
+            >>> np.sum(mask[:, 3:] == 0)  # No gaps in meteo channels
+            0
         """
         x_gapped = x.copy().astype(np.float32)
         mask = np.ones_like(x, dtype=np.float32)
@@ -79,15 +123,15 @@ class GapInjector:
         # Determine number of gaps to inject
         n_gaps = self.rng.integers(self.min_gaps, self.max_gaps + 1)
         
-        # Select channels to gap (randomly based on probability)
+        # Select channels to gap (ONLY from gappable channels)
         channels_to_gap = []
-        for ch in range(n_channels):
-            if self.rng.random() < self.gap_channel_prob:
+        for ch in self.gappable_channels:
+            if ch < n_channels and self.rng.random() < self.gap_channel_prob:
                 channels_to_gap.append(ch)
         
-        # Ensure at least one channel is gapped
+        # Ensure at least one gappable channel is selected
         if not channels_to_gap:
-            channels_to_gap = [self.rng.integers(0, n_channels)]
+            channels_to_gap = [self.rng.choice(self.gappable_channels)]
         
         # Inject gaps
         for _ in range(n_gaps):

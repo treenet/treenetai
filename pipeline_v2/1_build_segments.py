@@ -32,6 +32,7 @@ from src.data.loaders import DataLoaders
 from src.data.processors import DataProcessor, YearGridBuilder
 from src.data.segmentation import SegmentBuilder, SegmentMetadata
 from src.utils import setup_logging, ensure_dir
+from src.reporting import BuildReportCollector, save_report
 
 
 def parse_args():
@@ -47,7 +48,7 @@ def parse_args():
     parser.add_argument(
         '--meteo-root',
         type=str,
-        default='/storage/lukovic/Data/FORWARDS/treenet/meteo_data',
+        default='/storage/lukovic/Data/FORWARDS/treenet/server_data/meteo_data',
         help='Directory with meteotest CSV files'
     )
     parser.add_argument(
@@ -55,6 +56,12 @@ def parse_args():
         type=str,
         default='/storage/lukovic/Data/FORWARDS/treenet/processed',
         help='Output directory for processed segments'
+    )
+    parser.add_argument(
+        '--country',
+        type=str,
+        default='Switzerland',
+        help='Filter sites by country (default: Switzerland). Use "all" to include all countries.'
     )
     parser.add_argument(
         '--test-ratio',
@@ -129,11 +136,15 @@ def main():
     log_file = output_dir.parent / 'segment_building.log'
     setup_logging(verbose=args.verbose, log_file=log_file)
     
+    # Determine country filter
+    country_filter = None if args.country.lower() == 'all' else args.country
+    
     print("="*80)
     print("TreeNet AI Pipeline v2 - Segment Building")
     print("="*80)
     print(f"Segment length: {args.segment_days} days, Stride: {args.stride_days} days")
     print(f"Normalization scope: {args.norm_scope}")
+    print(f"Country filter: {args.country}")
     print("="*80)
     
     # Initialize components
@@ -150,16 +161,30 @@ def main():
         norm_scope=args.norm_scope
     )
     
+    # Initialize report collector
+    report_collector = BuildReportCollector(
+        output_root=args.output_root,
+        country_filter=args.country,
+        segment_days=args.segment_days,
+        stride_days=args.stride_days,
+        norm_scope=args.norm_scope,
+        random_seed=args.random_seed,
+        max_combinations=args.max_combinations
+    )
+    
     # Load metadata
     print("\n2. Loading metadata...")
     metadata = loaders.load_metadata()
     print(f"   Total sensors: {len(metadata)}")
     
-    # Find sites with complete data
-    print("\n3. Finding sites with complete sensor coverage...")
-    complete_sites = loaders.get_sites_with_complete_data(metadata)
+    # Find sites with complete data (filtered by country)
+    print(f"\n3. Finding sites with complete sensor coverage (country={args.country})...")
+    complete_sites = loaders.get_sites_with_complete_data(metadata, country=country_filter)
     print(f"   Sites with all 3 sensor types: {len(complete_sites)}")
     print(f"   Site IDs: {sorted(complete_sites)}")
+    
+    # Record available sites
+    report_collector.set_available_sites(list(complete_sites))
     
     # Split into train/test
     print(f"\n4. Splitting sites (test ratio: {args.test_ratio})...")
@@ -185,11 +210,17 @@ def main():
     print(f"   Train sites ({len(train_sites)}): {sorted(train_sites)}")
     print(f"   Test sites ({len(test_sites)}): {sorted(test_sites)}")
     
+    # Record train/test split in report
+    report_collector.set_train_test_split(list(train_sites), list(test_sites))
+    
     # Process each split
     for split_name, sites in [('train', train_sites), ('test', test_sites)]:
         print(f"\n{'='*80}")
         print(f"Processing {split_name.upper()} split")
         print(f"{'='*80}")
+        
+        # Set current split in report collector
+        report_collector.set_current_split(split_name)
         
         all_input_segments = {}
         all_output_segments = {}
@@ -217,8 +248,20 @@ def main():
             
             # Load meteo data
             meteo_df = loaders.load_meteotest_data(site_id)
-            if meteo_df is None:
+            has_meteo = meteo_df is not None
+            
+            # Start site in report collector
+            report_collector.start_site(
+                site_id=site_id,
+                n_thermometers=len(thermo_ids),
+                n_hygrometers=len(hygro_ids),
+                n_dendrometers=len(dendro_l2_ids),
+                has_meteo=has_meteo
+            )
+            
+            if not has_meteo:
                 print(f"    WARNING: No meteo data for site {site_id}, skipping")
+                report_collector.finalize_site(site_id)
                 continue
             
             meteo_daily = processor.process_meteo_daily(meteo_df)
@@ -305,6 +348,18 @@ def main():
                 
                 print(f"      Segments found: {len(input_segs)}")
                 
+                # Record combination in report (including gap analysis)
+                report_collector.record_combination(
+                    site_id=site_id,
+                    thermometer_id=thermo_id,
+                    hygrometer_id=hygro_id,
+                    dendrometer_id=dendro_id,
+                    segment_count=len(input_segs),
+                    segment_metadata=seg_metadata,
+                    input_df=input_df,
+                    output_df=output_df
+                )
+                
                 if len(input_segs) > 0:
                     all_input_segments[combo_counter] = input_segs
                     all_output_segments[combo_counter] = output_segs
@@ -317,6 +372,9 @@ def main():
                         'hygrometer ID': hygro_id,
                         'dendrometer ID': dendro_id
                     })
+            
+            # Finalize site in report
+            report_collector.finalize_site(site_id)
         
         # Save segments
         print(f"\n  Saving {split_name} segments...")
@@ -332,9 +390,17 @@ def main():
             combo_ids=all_combo_ids
         )
     
+    # Generate and save build report
+    print("\n" + "-"*80)
+    print("Generating build report...")
+    report = report_collector.generate_report()
+    report_dir = output_dir / "reports"
+    save_report(report, report_dir)
+    
     print("\n" + "="*80)
     print("Segment building complete!")
     print(f"Output saved to: {output_dir}")
+    print(f"Build report saved to: {report_dir}")
     print("="*80)
 
 
