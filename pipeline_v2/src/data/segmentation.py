@@ -55,6 +55,9 @@ class Normalizer:
     Supports two normalization scopes:
     - 'year': Normalization at the year level for consistent scales across segments
     - 'segment': Normalization per-segment for local adaptation (handles jumps better)
+    
+    For stem radius channel, special handling is applied to align input and output
+    scales since they come from different data sources (dendrometer_l2 vs dendrometer_lm).
     """
     
     def __init__(self, norm_scope: str = 'year'):
@@ -65,6 +68,115 @@ class Normalizer:
             norm_scope: 'year' for year-level normalization, 'segment' for segment-level
         """
         self.norm_scope = norm_scope
+    
+    @staticmethod
+    def align_stem_signals_yearly(
+        input_stem: pd.Series,
+        output_stem: pd.Series
+    ) -> tuple:
+        """
+        Align input and output stem signals for consistent normalization.
+        
+        This addresses the issue where input stem (from dendrometer_l2) and 
+        output stem (from dendrometer_lm) have different baseline values.
+        
+        Process for each year:
+        1. Find first common valid timestamp where both signals have non-NaN values
+        2. Shift both signals so they start from zero at this timestamp
+        3. Find last common valid timestamp near year end
+        4. Compute normalization params from the aligned interval
+        
+        The starting point (offset) of stem radius is physically irrelevant,
+        so this alignment preserves physical meaning while enabling consistent normalization.
+        
+        Args:
+            input_stem: Input stem Series (10-min resolution)
+            output_stem: Output stem Series (hourly resolution)
+            
+        Returns:
+            Tuple of (aligned_input_stem, aligned_output_stem, 
+                      input_min, input_diff, output_min, output_diff)
+        """
+        # Group by year
+        input_years = input_stem.index.year.unique()
+        output_years = output_stem.index.year.unique()
+        common_years = sorted(set(input_years) & set(output_years))
+        
+        if len(common_years) == 0:
+            # No overlap - fall back to independent normalization
+            return input_stem, output_stem, None, None, None, None
+        
+        aligned_input = input_stem.copy()
+        aligned_output = output_stem.copy()
+        
+        # Track all shifts for consistency check
+        all_input_shifts = []
+        all_output_shifts = []
+        
+        for year in common_years:
+            # Get year slices
+            input_year_mask = input_stem.index.year == year
+            output_year_mask = output_stem.index.year == year
+            
+            input_year = input_stem[input_year_mask].dropna()
+            output_year = output_stem[output_year_mask].dropna()
+            
+            if len(input_year) == 0 or len(output_year) == 0:
+                continue
+            
+            # Find first common valid timestamp
+            # Need to align to hourly for comparison (input is 10-min, output is hourly)
+            input_hourly_times = input_year.index.floor('h').unique()
+            output_times = output_year.index
+            
+            common_times = sorted(set(input_hourly_times) & set(output_times))
+            
+            if len(common_times) == 0:
+                continue
+            
+            first_common = common_times[0]
+            last_common = common_times[-1]
+            
+            # Get values at first common timestamp
+            # For input, get the value at the hour mark
+            input_at_first = input_year[input_year.index.floor('h') == first_common]
+            if len(input_at_first) > 0:
+                input_shift = input_at_first.iloc[0]
+            else:
+                continue
+                
+            output_at_first = output_year.loc[first_common] if first_common in output_year.index else None
+            if output_at_first is None or pd.isna(output_at_first):
+                continue
+            output_shift = output_at_first
+            
+            # Apply shifts for this year
+            aligned_input.loc[input_year_mask] = input_stem[input_year_mask] - input_shift
+            aligned_output.loc[output_year_mask] = output_stem[output_year_mask] - output_shift
+            
+            all_input_shifts.append(input_shift)
+            all_output_shifts.append(output_shift)
+        
+        # Compute normalization params from aligned signals
+        input_vals = aligned_input.dropna()
+        output_vals = aligned_output.dropna()
+        
+        if len(input_vals) == 0 or len(output_vals) == 0:
+            return input_stem, output_stem, None, None, None, None
+        
+        input_min = float(input_vals.min())
+        input_max = float(input_vals.max())
+        input_diff = input_max - input_min
+        if input_diff < 1e-8:
+            input_diff = 1.0
+        
+        output_min = float(output_vals.min())
+        output_max = float(output_vals.max())
+        output_diff = output_max - output_min
+        if output_diff < 1e-8:
+            output_diff = 1.0
+        
+        return aligned_input, aligned_output, input_min, input_diff, output_min, output_diff
     
     @staticmethod
     def compute_normalization_params(
@@ -421,21 +533,49 @@ class SegmentBuilder:
         metadata_list = []
         
         if self.norm_scope == 'year':
-            # Year-level normalization (original approach)
-            # 1. Compute normalization parameters from all available data
+            # Year-level normalization with aligned stem handling
+            
+            # 1. Handle stem channel specially - align input and output scales
+            if 'stem' in input_df.columns and 'stem' in output_df.columns:
+                (aligned_input_stem, aligned_output_stem,
+                 stem_input_min, stem_input_diff,
+                 stem_output_min, stem_output_diff) = self.normalizer.align_stem_signals_yearly(
+                    input_df['stem'], output_df['stem']
+                )
+                
+                # Create working copies with aligned stem
+                input_df_aligned = input_df.copy()
+                output_df_aligned = output_df.copy()
+                input_df_aligned['stem'] = aligned_input_stem
+                output_df_aligned['stem'] = aligned_output_stem
+            else:
+                input_df_aligned = input_df
+                output_df_aligned = output_df
+                stem_input_min, stem_input_diff = None, None
+                stem_output_min, stem_output_diff = None, None
+            
+            # 2. Compute normalization parameters for all channels
             input_min, input_diff = self.normalizer.compute_normalization_params(
-                input_df, self.norm_method
+                input_df_aligned, self.norm_method
             )
             output_min, output_diff = self.normalizer.compute_normalization_params(
-                output_df, self.norm_method
+                output_df_aligned, self.norm_method
             )
             
-            # 2. Normalize full data
+            # Use aligned stem params if computed
+            if stem_input_min is not None:
+                input_min['stem'] = stem_input_min
+                input_diff['stem'] = stem_input_diff
+            if stem_output_min is not None:
+                output_min['stem'] = stem_output_min
+                output_diff['stem'] = stem_output_diff
+            
+            # 3. Normalize full data
             input_normalized = self.normalizer.normalize(
-                input_df, input_min, input_diff
+                input_df_aligned, input_min, input_diff
             )
             output_normalized = self.normalizer.normalize(
-                output_df, output_min, output_diff
+                output_df_aligned, output_min, output_diff
             )
             
             # 3. Find valid segments

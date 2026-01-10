@@ -178,6 +178,11 @@ class ModelConfig:
     n_blocks: int = 4
     dropout_rate: float = 0.2
     
+    # Attention mechanism (optional)
+    use_attention: bool = False
+    n_attention_heads: int = 4
+    attention_key_dim: int = 32
+    
     # Training
     batch_size: int = 32
     epochs: int = 100

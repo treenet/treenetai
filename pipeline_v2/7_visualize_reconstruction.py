@@ -52,8 +52,8 @@ def parse_args():
     parser.add_argument(
         '--output-dir',
         type=str,
-        default='./visualizations',
-        help='Output directory for plots'
+        default='/home/lukovic/data/treenet/visualizations/reconstruction',
+        help='Output directory for plots (default: /home/lukovic/data/treenet/visualizations/reconstruction)'
     )
     parser.add_argument(
         '--site-id',

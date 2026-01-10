@@ -55,6 +55,11 @@ def parse_args():
     parser.add_argument('--n-blocks', type=int, default=4, help='Number of TCN blocks')
     parser.add_argument('--dropout', type=float, default=0.2, help='Dropout rate')
     
+    # Attention
+    parser.add_argument('--use-attention', action='store_true', help='Add attention after TCN encoder')
+    parser.add_argument('--n-attention-heads', type=int, default=4, help='Number of attention heads')
+    parser.add_argument('--attention-key-dim', type=int, default=32, help='Attention key dimension')
+    
     # Training
     parser.add_argument('--epochs', type=int, default=100, help='Training epochs')
     parser.add_argument('--batch-size', type=int, default=32, help='Batch size')
@@ -102,6 +107,11 @@ def main():
     config.model.batch_size = args.batch_size
     config.model.learning_rate = args.learning_rate
     
+    # Attention config
+    config.model.use_attention = args.use_attention
+    config.model.n_attention_heads = args.n_attention_heads
+    config.model.attention_key_dim = args.attention_key_dim
+    
     # Update gap config
     config.gap.enabled = not args.no_gaps
     config.gap.min_gap_days = args.min_gap_days
@@ -110,6 +120,10 @@ def main():
     config.verbose = args.verbose
     
     print(f"  Model: TCN with {args.n_blocks} blocks, {args.n_filters} filters")
+    if args.use_attention:
+        print(f"  Attention: {args.n_attention_heads} heads, key_dim={args.attention_key_dim}")
+    else:
+        print(f"  Attention: disabled")
     print(f"  Training: {args.epochs} epochs, batch size {args.batch_size}")
     print(f"  Gap injection: {'enabled' if config.gap.enabled else 'disabled'}")
     if config.gap.enabled:

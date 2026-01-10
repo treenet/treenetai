@@ -126,13 +126,68 @@ class TCNBlock(layers.Layer):
         return config
 
 
+class PositionalEncoding(layers.Layer):
+    """
+    Sinusoidal positional encoding for attention.
+    
+    Adds position information to embeddings so attention can distinguish
+    different timesteps. Uses sine and cosine functions of different frequencies.
+    """
+    
+    def __init__(self, max_len: int = 5000, **kwargs):
+        super().__init__(**kwargs)
+        self.max_len = max_len
+    
+    def build(self, input_shape):
+        """Build positional encoding matrix."""
+        d_model = input_shape[-1]
+        
+        # Create position encoding matrix
+        position = tf.range(self.max_len, dtype=tf.float32)[:, tf.newaxis]
+        div_term = tf.exp(tf.range(0, d_model, 2, dtype=tf.float32) * 
+                         -(tf.math.log(10000.0) / d_model))
+        
+        pe = tf.zeros((self.max_len, d_model))
+        
+        # Use tf.tensor_scatter_nd_update for assignment
+        indices_sin = tf.stack([
+            tf.repeat(tf.range(self.max_len), d_model // 2),
+            tf.tile(tf.range(0, d_model, 2), [self.max_len])
+        ], axis=1)
+        indices_cos = tf.stack([
+            tf.repeat(tf.range(self.max_len), d_model // 2),
+            tf.tile(tf.range(1, d_model, 2), [self.max_len])
+        ], axis=1)
+        
+        sin_values = tf.reshape(tf.sin(position * div_term), [-1])
+        cos_values = tf.reshape(tf.cos(position * div_term), [-1])
+        
+        pe = tf.tensor_scatter_nd_update(pe, indices_sin, sin_values)
+        pe = tf.tensor_scatter_nd_update(pe, indices_cos, cos_values)
+        
+        self.pe = tf.Variable(pe, trainable=False, name='positional_encoding')
+        
+        super().build(input_shape)
+    
+    def call(self, x):
+        """Add positional encoding to input."""
+        seq_len = tf.shape(x)[1]
+        return x + self.pe[:seq_len, :]
+    
+    def get_config(self):
+        config = super().get_config()
+        config.update({'max_len': self.max_len})
+        return config
+
+
 class TCNModel:
     """
     Multi-task TCN for gap filling and hourly prediction.
     
     Architecture:
     1. Encoder: Stack of TCN blocks with increasing dilation
-    2. Two decoder branches:
+    2. Optional: Multi-head attention for global context
+    3. Two decoder branches:
        a) Reconstruction: Predict masked 10-min inputs
        b) Hourly prediction: Predict cleaned hourly targets
     """
@@ -146,7 +201,10 @@ class TCNModel:
         n_blocks: int = 4,
         dropout_rate: float = 0.2,
         input_length: int = 4320,
-        output_length: int = 720
+        output_length: int = 720,
+        use_attention: bool = False,
+        n_attention_heads: int = 4,
+        attention_key_dim: int = 32
     ):
         """
         Initialize TCN model.
@@ -160,6 +218,9 @@ class TCNModel:
             dropout_rate: Dropout probability
             input_length: Length of input sequence (10-min steps)
             output_length: Length of output sequence (hourly steps)
+            use_attention: Whether to add attention after TCN encoder
+            n_attention_heads: Number of attention heads (if use_attention=True)
+            attention_key_dim: Key dimension per attention head
         """
         self.n_input_channels = n_input_channels
         self.n_target_channels = n_target_channels
@@ -169,6 +230,9 @@ class TCNModel:
         self.dropout_rate = dropout_rate
         self.input_length = input_length
         self.output_length = output_length
+        self.use_attention = use_attention
+        self.n_attention_heads = n_attention_heads
+        self.attention_key_dim = attention_key_dim
         
         self.model = None
     
@@ -203,6 +267,46 @@ class TCNModel:
                 dilation_rate=dilation,
                 dropout_rate=self.dropout_rate,
                 name=f'tcn_block_{i}'
+            )(x)
+        
+        # Optional attention layer for global context
+        if self.use_attention:
+            # Add positional encoding for attention
+            x = PositionalEncoding(max_len=self.input_length, name='pos_encoding')(x)
+            
+            # Multi-head self-attention
+            # For efficiency on long sequences, we use a strided approach
+            # Downsample -> Attention -> Upsample
+            
+            # Downsample for efficient attention (factor of 6)
+            x_downsampled = layers.AveragePooling1D(
+                pool_size=6, strides=6, name='attention_downsample'
+            )(x)
+            
+            # Apply multi-head attention on downsampled sequence
+            attn_output = layers.MultiHeadAttention(
+                num_heads=self.n_attention_heads,
+                key_dim=self.attention_key_dim,
+                dropout=self.dropout_rate,
+                name='multi_head_attention'
+            )(x_downsampled, x_downsampled)
+            
+            # Add & Norm (standard transformer pattern)
+            x_downsampled = layers.Add(name='attention_residual')([x_downsampled, attn_output])
+            x_downsampled = layers.LayerNormalization(name='attention_layer_norm')(x_downsampled)
+            
+            # Upsample back to original resolution
+            x_upsampled = layers.UpSampling1D(size=6, name='attention_upsample')(x_downsampled)
+            
+            # Merge attention context with original features
+            x = layers.Concatenate(name='merge_attention')([x, x_upsampled])
+            
+            # Project back to n_filters dimensions
+            x = layers.Conv1D(
+                filters=self.n_filters,
+                kernel_size=1,
+                activation='relu',
+                name='attention_projection'
             )(x)
         
         # Branch 1: Reconstruction (10-min resolution)
@@ -319,7 +423,10 @@ class TCNModel:
         """Load model from file."""
         return keras.models.load_model(
             filepath,
-            custom_objects={'TCNBlock': TCNBlock}
+            custom_objects={
+                'TCNBlock': TCNBlock,
+                'PositionalEncoding': PositionalEncoding
+            }
         )
 
 
@@ -328,7 +435,10 @@ def create_tcn_model(
     kernel_size: int = 3,
     n_blocks: int = 4,
     dropout_rate: float = 0.2,
-    learning_rate: float = 3e-4
+    learning_rate: float = 3e-4,
+    use_attention: bool = False,
+    n_attention_heads: int = 4,
+    attention_key_dim: int = 32
 ) -> keras.Model:
     """
     Convenience function to create and compile a TCN model.
@@ -339,6 +449,9 @@ def create_tcn_model(
         n_blocks: Number of TCN blocks
         dropout_rate: Dropout probability
         learning_rate: Learning rate
+        use_attention: Whether to add attention after TCN encoder
+        n_attention_heads: Number of attention heads (if use_attention=True)
+        attention_key_dim: Key dimension per attention head
         
     Returns:
         Compiled Keras model
@@ -347,7 +460,10 @@ def create_tcn_model(
         n_filters=n_filters,
         kernel_size=kernel_size,
         n_blocks=n_blocks,
-        dropout_rate=dropout_rate
+        dropout_rate=dropout_rate,
+        use_attention=use_attention,
+        n_attention_heads=n_attention_heads,
+        attention_key_dim=attention_key_dim
     )
     
     model = tcn.build()

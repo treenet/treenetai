@@ -30,7 +30,7 @@ OUTPUT_ROOT="/storage/lukovic/Data/FORWARDS/treenet/processed"
 
 # Optional: custom experiment name (leave empty for timestamp only)
 # Examples: "baseline", "larger_model", "test_1"
-EXPERIMENT_NAME=""
+EXPERIMENT_NAME="attention_v2"
 
 # ─────────────────────────────────────────────────────────────────────────────────
 # MODEL ARCHITECTURE HYPERPARAMETERS
@@ -38,7 +38,7 @@ EXPERIMENT_NAME=""
 # Number of convolutional filters
 # Options: 32, 64, 128, 256
 # Higher = more capacity but slower training
-N_FILTERS=64
+N_FILTERS=128
 
 # Convolutional kernel size
 # Options: 3, 5, 7
@@ -48,12 +48,30 @@ KERNEL_SIZE=3
 # Number of TCN blocks (depth of network)
 # Options: 2, 3, 4, 5, 6
 # More blocks = larger receptive field, but more parameters
-N_BLOCKS=4
+N_BLOCKS=5
 
 # Dropout rate for regularization
 # Options: 0.1, 0.2, 0.3, 0.4
 # Higher = more regularization (helps prevent overfitting)
 DROPOUT=0.2
+
+# ─────────────────────────────────────────────────────────────────────────────────
+# ATTENTION MECHANISM (OPTIONAL)
+# ─────────────────────────────────────────────────────────────────────────────────
+# Enable multi-head attention after TCN encoder: true/false
+# Attention adds global context - can "see" entire time series
+# Recommended: try both with and without, compare results
+USE_ATTENTION="true"
+
+# Number of attention heads
+# Options: 2, 4, 8
+# More heads = more diverse attention patterns
+N_ATTENTION_HEADS=8
+
+# Attention key dimension (per head)
+# Options: 16, 32, 64
+# Higher = more expressive but more parameters
+ATTENTION_KEY_DIM=64
 
 # ─────────────────────────────────────────────────────────────────────────────────
 # TRAINING HYPERPARAMETERS
@@ -103,7 +121,7 @@ MIN_LR=0.000001
 # ─────────────────────────────────────────────────────────────────────────────────
 # GPU ID to use (0-5 for 6-GPU system)
 # Check availability with: nvidia-smi
-GPU_ID=0
+GPU_ID=1
 
 # ─────────────────────────────────────────────────────────────────────────────────
 # PROCESSING OPTIONS
@@ -130,6 +148,9 @@ N_FILTERS="${N_FILTERS_ENV:-$N_FILTERS}"
 KERNEL_SIZE="${KERNEL_SIZE_ENV:-$KERNEL_SIZE}"
 N_BLOCKS="${N_BLOCKS_ENV:-$N_BLOCKS}"
 DROPOUT="${DROPOUT_ENV:-$DROPOUT}"
+USE_ATTENTION="${USE_ATTENTION_ENV:-$USE_ATTENTION}"
+N_ATTENTION_HEADS="${N_ATTENTION_HEADS_ENV:-$N_ATTENTION_HEADS}"
+ATTENTION_KEY_DIM="${ATTENTION_KEY_DIM_ENV:-$ATTENTION_KEY_DIM}"
 EPOCHS="${EPOCHS_ENV:-$EPOCHS}"
 BATCH_SIZE="${BATCH_SIZE_ENV:-$BATCH_SIZE}"
 LEARNING_RATE="${LEARNING_RATE_ENV:-$LEARNING_RATE}"
@@ -182,6 +203,11 @@ n_filters = ${N_FILTERS}
 kernel_size = ${KERNEL_SIZE}
 n_blocks = ${N_BLOCKS}
 dropout_rate = ${DROPOUT}
+
+[attention]
+use_attention = ${USE_ATTENTION}
+n_attention_heads = ${N_ATTENTION_HEADS}
+attention_key_dim = ${ATTENTION_KEY_DIM}
 
 [training]
 epochs = ${EPOCHS}
@@ -249,6 +275,12 @@ if [ "${ENABLE_GAPS}" = "false" ]; then
     CMD="${CMD} --no-gaps"
 fi
 
+if [ "${USE_ATTENTION}" = "true" ]; then
+    CMD="${CMD} --use-attention"
+    CMD="${CMD} --n-attention-heads ${N_ATTENTION_HEADS}"
+    CMD="${CMD} --attention-key-dim ${ATTENTION_KEY_DIM}"
+fi
+
 if [ "${VERBOSE}" = "true" ]; then
     CMD="${CMD} --verbose"
 fi
@@ -272,6 +304,7 @@ log "Output: ${EXPERIMENT_DIR}"
 # Print hyperparameters summary
 log "Hyperparameters:"
 log "  Architecture: ${N_FILTERS} filters, ${N_BLOCKS} blocks, kernel=${KERNEL_SIZE}, dropout=${DROPOUT}"
+log "  Attention: ${USE_ATTENTION} (heads=${N_ATTENTION_HEADS}, key_dim=${ATTENTION_KEY_DIM})"
 log "  Training: ${EPOCHS} epochs, batch=${BATCH_SIZE}, lr=${LEARNING_RATE}"
 log "  Gaps: ${MIN_GAP_DAYS}-${MAX_GAP_DAYS} days (enabled: ${ENABLE_GAPS})"
 

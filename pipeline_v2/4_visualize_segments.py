@@ -126,10 +126,13 @@ def main():
         sys.exit(1)
     
     # Determine output directory
+    # Default: /home/lukovic/data/treenet/visualizations/segments/<split>/
+    DEFAULT_OUTPUT_ROOT = Path('/home/lukovic/data/treenet')
+    
     if args.output_dir:
         output_dir = args.output_dir
     else:
-        output_dir = Path(config.paths.model_data_dir) / 'visualizations' / args.split
+        output_dir = DEFAULT_OUTPUT_ROOT / 'visualizations' / 'segments' / args.split
     
     output_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Output directory: {output_dir}")

@@ -16,12 +16,103 @@ from ..gaps.gap_injection import GapInjector
 from ..gaps.metrics import GapFillingMetrics
 
 
+class SegmentNormalizer:
+    """
+    Normalizes segments with gap-awareness for segment-level normalization.
+    
+    When gaps are present, normalization parameters are computed from
+    non-gap regions only. This reflects real-world gap-filling scenarios
+    where we don't know the min/max values in the gap region.
+    """
+    
+    @staticmethod
+    def normalize_with_mask(
+        segment: np.ndarray,
+        mask: np.ndarray,
+        method: str = 'minmax'
+    ) -> tuple:
+        """
+        Normalize segment using only non-gap regions.
+        
+        Args:
+            segment: Data array (timesteps, channels)
+            mask: Binary mask (1=valid, 0=gap)
+            method: 'minmax' for [0,1] scaling
+            
+        Returns:
+            Tuple of (normalized_segment, norm_params)
+            norm_params is dict with 'min' and 'diff' per channel
+        """
+        normalized = segment.copy()
+        norm_params = {'min': {}, 'diff': {}}
+        
+        n_channels = segment.shape[-1]
+        
+        for ch in range(n_channels):
+            # Get valid (non-gap) values for this channel
+            valid_mask = mask[:, ch] > 0.5
+            valid_values = segment[valid_mask, ch]
+            
+            if len(valid_values) == 0:
+                # No valid values - use defaults
+                norm_params['min'][ch] = 0.0
+                norm_params['diff'][ch] = 1.0
+                continue
+            
+            if method == 'minmax':
+                vmin = float(valid_values.min())
+                vmax = float(valid_values.max())
+                diff = vmax - vmin
+                
+                if diff < 1e-8:
+                    diff = 1.0
+                
+                norm_params['min'][ch] = vmin
+                norm_params['diff'][ch] = diff
+                
+                # Normalize entire channel (including gap region)
+                # Gap values will be 0 from gap injection, so they'll normalize to -vmin/diff
+                normalized[:, ch] = (segment[:, ch] - vmin) / diff
+        
+        return normalized, norm_params
+    
+    @staticmethod
+    def denormalize(
+        segment: np.ndarray,
+        norm_params: dict
+    ) -> np.ndarray:
+        """
+        Reverse normalization.
+        
+        Args:
+            segment: Normalized array
+            norm_params: Dict with 'min' and 'diff' per channel
+            
+        Returns:
+            Denormalized array
+        """
+        denormalized = segment.copy()
+        
+        for ch in range(segment.shape[-1]):
+            if ch in norm_params['min'] and ch in norm_params['diff']:
+                vmin = norm_params['min'][ch]
+                vdiff = norm_params['diff'][ch]
+                denormalized[:, ch] = segment[:, ch] * vdiff + vmin
+        
+        return denormalized
+
+
 class DataGenerator(keras.utils.Sequence):
     """
     Data generator for training with on-the-fly gap injection.
     
     This generates batches during training with random gaps injected,
     which serves as data augmentation.
+    
+    Supports two modes:
+    1. Pre-normalized data (norm_on_fly=False): Data is already normalized
+    2. Gap-aware normalization (norm_on_fly=True): Normalizes each segment
+       using only non-gap regions (for segment-level normalization)
     """
     
     def __init__(
@@ -30,7 +121,9 @@ class DataGenerator(keras.utils.Sequence):
         y: np.ndarray,
         batch_size: int = 32,
         gap_injector: Optional[GapInjector] = None,
-        shuffle: bool = True
+        shuffle: bool = True,
+        norm_on_fly: bool = False,
+        norm_method: str = 'minmax'
     ):
         """
         Initialize data generator.
@@ -41,12 +134,19 @@ class DataGenerator(keras.utils.Sequence):
             batch_size: Batch size
             gap_injector: GapInjector instance for augmentation
             shuffle: Whether to shuffle data between epochs
+            norm_on_fly: If True, normalize each segment dynamically using
+                        only non-gap regions (for segment-level normalization)
+            norm_method: Normalization method ('minmax')
         """
         self.X = X
         self.y = y
         self.batch_size = batch_size
         self.gap_injector = gap_injector
         self.shuffle = shuffle
+        self.norm_on_fly = norm_on_fly
+        self.norm_method = norm_method
+        
+        self.segment_normalizer = SegmentNormalizer() if norm_on_fly else None
         
         self.n_samples = len(X)
         self.indices = np.arange(self.n_samples)
@@ -74,15 +174,70 @@ class DataGenerator(keras.utils.Sequence):
         batch_indices = self.indices[start_idx:end_idx]
         
         # Get batch data
-        X_batch = self.X[batch_indices]
-        y_batch = self.y[batch_indices]
+        X_batch = self.X[batch_indices].copy()
+        y_batch = self.y[batch_indices].copy()
         
         # Inject gaps if configured
         if self.gap_injector is not None:
             X_gapped, masks = self.gap_injector.inject_gaps_batch(X_batch)
         else:
-            X_gapped = X_batch
+            X_gapped = X_batch.copy()
             masks = np.ones_like(X_batch)
+        
+        # Apply gap-aware normalization if configured
+        if self.norm_on_fly:
+            X_normalized = np.zeros_like(X_gapped)
+            y_normalized = np.zeros_like(y_batch)
+            
+            for i in range(len(batch_indices)):
+                # Normalize input using only non-gap regions
+                X_normalized[i], _ = self.segment_normalizer.normalize_with_mask(
+                    X_gapped[i], masks[i], self.norm_method
+                )
+                
+                # For targets, we need to use the same normalization logic
+                # But targets don't have gaps, so we use the input's valid mask
+                # to determine normalization params, then apply to targets
+                
+                # For the 3 target channels, find corresponding input channels
+                # local_T (target 0) ~ temp_treenet (input 0)
+                # local_RH (target 1) ~ rh_treenet (input 1)
+                # stem (target 2) ~ stem (input 2)
+                
+                # Use input mask to compute target normalization
+                y_norm_params = {'min': {}, 'diff': {}}
+                for ch in range(y_batch.shape[-1]):
+                    # Get valid values from input (same mask)
+                    # But target has hourly resolution, input has 10-min
+                    # So we subsample the mask
+                    if X_gapped.shape[1] == 4320 and y_batch.shape[1] == 720:
+                        # Subsample mask to hourly (every 6th timestep)
+                        hourly_mask = masks[i, ::6, ch] if ch < masks.shape[-1] else np.ones(720)
+                    else:
+                        hourly_mask = masks[i, :, ch] if ch < masks.shape[-1] else np.ones(y_batch.shape[1])
+                    
+                    valid_mask = hourly_mask > 0.5
+                    valid_values = y_batch[i, valid_mask, ch]
+                    
+                    if len(valid_values) > 0:
+                        vmin = float(valid_values.min())
+                        vmax = float(valid_values.max())
+                        diff = vmax - vmin if vmax - vmin > 1e-8 else 1.0
+                    else:
+                        vmin, diff = 0.0, 1.0
+                    
+                    y_norm_params['min'][ch] = vmin
+                    y_norm_params['diff'][ch] = diff
+                    y_normalized[i, :, ch] = (y_batch[i, :, ch] - vmin) / diff
+            
+            X_gapped = X_normalized
+            # Keep y_batch as reconstruction target (original unnormalized)
+            # But use normalized for hourly output
+            X_batch_recon = X_normalized  # For reconstruction
+            y_batch_hourly = y_normalized  # For hourly prediction
+        else:
+            X_batch_recon = X_batch
+            y_batch_hourly = y_batch
         
         # Prepare inputs
         inputs = {
@@ -92,8 +247,8 @@ class DataGenerator(keras.utils.Sequence):
         
         # Prepare targets
         targets = {
-            'recon_output': X_batch.astype(np.float32),  # Original input for reconstruction
-            'hourly_output': y_batch.astype(np.float32)  # Hourly targets
+            'recon_output': X_batch_recon.astype(np.float32),  # For reconstruction loss
+            'hourly_output': y_batch_hourly.astype(np.float32)  # Hourly targets
         }
         
         return inputs, targets
@@ -189,6 +344,15 @@ class ModelTrainer:
         from ..models.tcn import TCNModel
         
         print("Building TCN model...")
+        
+        # Check for attention config
+        use_attention = getattr(self.config.model, 'use_attention', False)
+        n_attention_heads = getattr(self.config.model, 'n_attention_heads', 4)
+        attention_key_dim = getattr(self.config.model, 'attention_key_dim', 32)
+        
+        if use_attention:
+            print(f"  Attention: {n_attention_heads} heads, key_dim={attention_key_dim}")
+        
         tcn = TCNModel(
             n_input_channels=self.config.data.n_input_channels,
             n_target_channels=self.config.data.n_target_channels,
@@ -197,7 +361,10 @@ class ModelTrainer:
             n_blocks=self.config.model.n_blocks,
             dropout_rate=self.config.model.dropout_rate,
             input_length=self.config.segment.input_steps,
-            output_length=self.config.segment.output_steps
+            output_length=self.config.segment.output_steps,
+            use_attention=use_attention,
+            n_attention_heads=n_attention_heads,
+            attention_key_dim=attention_key_dim
         )
         
         model = tcn.build()
@@ -306,19 +473,33 @@ class ModelTrainer:
         print(f"Batch size: {self.config.model.batch_size}")
         print(f"Gap injection: {'enabled' if self.config.gap.enabled else 'disabled'}")
         
+        # Check if segment-level normalization is enabled
+        # If norm_scope='segment', data is raw and needs on-the-fly normalization
+        norm_scope = getattr(self.config.normalization, 'scope', 'year')
+        norm_on_fly = (norm_scope == 'segment')
+        
+        if norm_on_fly:
+            print(f"Normalization: on-the-fly (segment-level, gap-aware)")
+        else:
+            print(f"Normalization: pre-computed (year-level)")
+        
         # Create data generators
         train_gen = DataGenerator(
             X_train, y_train,
             batch_size=self.config.model.batch_size,
             gap_injector=self.gap_injector if self.config.gap.enabled else None,
-            shuffle=True
+            shuffle=True,
+            norm_on_fly=norm_on_fly,
+            norm_method=getattr(self.config.normalization, 'method', 'minmax')
         )
         
         val_gen = DataGenerator(
             X_test, y_test,
             batch_size=self.config.model.batch_size,
             gap_injector=None,  # No gaps for validation
-            shuffle=False
+            shuffle=False,
+            norm_on_fly=norm_on_fly,
+            norm_method=getattr(self.config.normalization, 'method', 'minmax')
         )
         
         # Train
