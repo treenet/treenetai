@@ -44,19 +44,68 @@ The pipeline trains a **deep learning model** to reconstruct missing data and pr
 │   ├── swp_l1/            # Soil water potential data
 │   ├── meteo_data/        # Daily meteorological data (Swiss sites only)
 │   └── metadata_*.pkl     # Various metadata pickle files
-├── processed/             # Processed model data and segments (old, 25 sites)
-└── processed_full_swiss/  # Full rebuild with all 52 Swiss sites
+└── processed/             # All processed model data, experiments, logs, reports
 ```
 
-> **Note**: The `climate/` directory has been removed as it is no longer relevant for this project.
+### Storage Directory Convention
+
+**CRITICAL: All outputs, logs, reports, and results should be stored in:**
+```
+/storage/lukovic/Data/FORWARDS/treenet/processed/
+```
+
+**Subdirectory Naming Convention:** `{country}_{scope}_{normalization}`
+
+| Component | Options | Description |
+|-----------|---------|-------------|
+| `{country}` | `swiss`, `netherlands`, `all` | Country of data origin |
+| `{scope}` | `full`, `subset`, `test` | Data scope (all sites vs limited) |
+| `{normalization}` | `yearly_norm`, `segment_norm` | Normalization method used |
+
+**Examples:**
+```
+/storage/lukovic/Data/FORWARDS/treenet/processed/
+├── swiss_full_yearly_norm/      # All Swiss sites, yearly normalization
+├── swiss_full_segment_norm/     # All Swiss sites, per-segment normalization  
+├── swiss_subset_yearly_norm/    # Limited Swiss sites for testing
+├── netherlands_full_yearly_norm/ # All Netherlands sites (future)
+└── all_full_yearly_norm/        # All countries combined (future)
+```
+
+**Directory Internal Structure:**
+```
+{run_name}/
+├── logs/              # Console logs, segment building logs
+│   ├── build_console.log
+│   └── training_console.log
+├── temp/              # Temporary/intermediate files during processing
+├── model_data/        # Processed segments and intermediate time series
+│   ├── intermediate_timeseries/
+│   ├── segments/
+│   └── reports/
+└── experiments/       # Training experiments with timestamps
+    └── YYYYMMDD_HHMMSS/
+        ├── best_model.keras
+        ├── final_model.keras
+        ├── config.json
+        ├── evaluation_metrics.json
+        ├── training_history.csv
+        └── tensorboard/
+```
+
+### Current Active Dataset
+- **Path**: `/storage/lukovic/Data/FORWARDS/treenet/processed/swiss_full_yearly_norm/`
+- **Description**: Full Swiss dataset (52 sites), yearly min-max normalization
+- **Segments**: 27,435 total (26,996 train + 439 test)
+- **Last trained**: January 2025
 
 ### Default Paths
 | Path Type | Location |
 |-----------|----------|
 | Raw data | `/storage/lukovic/Data/FORWARDS/treenet/server_data` |
 | Meteo data | `/storage/lukovic/Data/FORWARDS/treenet/server_data/meteo_data` |
-| Processed (old) | `/storage/lukovic/Data/FORWARDS/treenet/processed` |
-| Processed (full) | `/storage/lukovic/Data/FORWARDS/treenet/processed_full_swiss` |
+| **Processed (all)** | `/storage/lukovic/Data/FORWARDS/treenet/processed/` |
+| **Current dataset** | `/storage/lukovic/Data/FORWARDS/treenet/processed/swiss_full_yearly_norm/` |
 | Pipeline code | `/home/lukovic/codes/treenetai/pipeline_v2` |
 
 ---
@@ -142,12 +191,13 @@ Sensor combinations may have overlapping operation periods too short to form com
 Sites with higher IDs (e.g., 157+) are newer installations. These have raw sensor data but no LM (ground truth) data yet. **This is precisely why we are building this model** - to provide an automated process for creating LM data for new sites where manual processing hasn't been done yet.
 
 ### Latest Build Results (January 2025)
-| Split | Combinations | Segments |
-|-------|--------------|----------|
-| Train | 84 | 3,393 |
-| Test | 4 | 71 |
+| Split | Segments | Description |
+|-------|----------|-------------|
+| Train | 26,996 | 80% of data |
+| Test | 439 | 20% of data |
+| **Total** | **27,435** | All Swiss sites, yearly norm |
 
-Output: `/storage/lukovic/Data/FORWARDS/treenet/processed_full_swiss/processed/model_data`
+Output: `/storage/lukovic/Data/FORWARDS/treenet/processed/swiss_full_yearly_norm/model_data/`
 
 ---
 
@@ -253,7 +303,52 @@ predictions = model.predict([input_data, mask])
 
 ---
 
-## 7. Intermediate Data Files
+## 7. Hyperparameters
+
+All hyperparameters are centralized in `/home/lukovic/codes/treenetai/pipeline_v2/src/config.py`.
+
+### Key Dataclasses
+
+| Dataclass | Key Parameters | Description |
+|-----------|----------------|-------------|
+| `ModelConfig` | `n_filters=64`, `kernel_size=3`, `n_blocks=4`, `dropout_rate=0.2`, `batch_size=32`, `epochs=100`, `learning_rate=3e-4` | Model architecture & training |
+| `GapConfig` | `min_gap_days=1`, `max_gap_days=12`, `min_gaps_per_segment=1`, `max_gaps_per_segment=3` | Gap injection for augmentation |
+| `NormalizationConfig` | `method='minmax'`, `scope='year'` | Data normalization settings |
+| `SegmentConfig` | `segment_days=30`, `stride_days=10` | Segment extraction settings |
+| `SplitConfig` | `test_ratio=0.2`, `random_seed=42` | Train/test split |
+
+### Hyperparameter Tuning Notes
+- **batch_size=16**: Required on single GPU due to memory constraints (24GB RTX 3090)
+- **batch_size=32**: Works with 2+ GPUs or mixed precision
+- **n_filters**: Higher values (128) may improve accuracy but increase memory
+- **n_blocks**: 4 blocks provides sufficient receptive field for 30-day segments
+
+---
+
+## 8. Evaluation Metrics
+
+The evaluation function computes three metrics for each channel:
+
+| Metric | Formula | Interpretation |
+|--------|---------|----------------|
+| **MAE** | Mean Absolute Error | Average deviation from true value |
+| **MSE** | Mean Squared Error | Penalizes large errors more |
+| **R²** | Coefficient of Determination | Proportion of variance explained (1.0 = perfect) |
+
+### Latest Training Results (January 2025)
+
+**Hourly Prediction (Gap-Filling Output):**
+| Channel | MAE | R² |
+|---------|-----|-----|
+| Local Temperature | 0.055 | TBD |
+| Local RH | 0.092 | TBD |
+| Stem | 0.195 | TBD |
+
+**Note**: R² values will be computed in future training runs with updated evaluation code.
+
+---
+
+## 9. Intermediate Data Files
 
 During segment building, full multi-year time series are saved for each sensor combination before segmentation.
 
@@ -275,7 +370,7 @@ intermediate_timeseries/{split}_output_site{site_id}_T{thermo_id}_H{hygro_id}_D{
 | Format | Feather (`.ftr`) - fast binary, pandas-compatible |
 | Structure | DataFrame with `ts` column (timestamp) + data columns |
 | Coverage | ENTIRE available time series (not segmented) |
-| Location | `{output_root}/processed/model_data/intermediate_timeseries/` |
+| Location | `{output_root}/model_data/intermediate_timeseries/` |
 
 ### Use Cases
 1. **Reconstruction**: Apply trained model to fill gaps in full multi-year time series
@@ -285,7 +380,7 @@ intermediate_timeseries/{split}_output_site{site_id}_T{thermo_id}_H{hygro_id}_D{
 
 ---
 
-## 8. Python Environment
+## 10. Python Environment
 
 - **Python version**: 3.10.12
 - **Virtual environment**: `/home/lukovic/pyenv/lamella/bin/python`
@@ -299,15 +394,15 @@ intermediate_timeseries/{split}_output_site{site_id}_T{thermo_id}_H{hygro_id}_D{
 
 ---
 
-## 9. Pipeline Scripts
+## 11. Pipeline Scripts
 
 | Script | Purpose | Key Arguments |
 |--------|---------|---------------|
 | `1_build_segments.py` | Extract 30-day segments | `--country`, `--run-name`, `--max-sites`, `--max-combinations` |
-| `2_preprocess.py` | Prepare for training | |
-| `3_train_model.py` | Train TCN model | `--epochs`, `--batch-size` |
-| `4_evaluate_model.py` | Evaluate performance | |
-| `5_export_predictions.py` | Export predictions | |
+| `2_train_model.py` | Train TCN model | `--epochs`, `--batch-size`, `--data-dir`, `--output-dir` |
+| `3_evaluate.py` | Evaluate performance | |
+| `4_visualize_segments.py` | Visualize segments | |
+| `5_compare_with_raw.py` | Compare with raw data | |
 | `6_reconstruct_timeseries.py` | **Gap-filling main script** | `--site-id`, `--model-path` |
 | `7_visualize_reconstruction.py` | Before/after plots | `--site-id` |
 
@@ -329,16 +424,33 @@ The `--run-name` argument controls the output organization:
 #### Example Commands
 ```bash
 # Build with all Swiss sites (recommended)
-python 1_build_segments.py --run-name processed_full_swiss_v3 --country Switzerland --max-combinations -1
+python 1_build_segments.py --run-name swiss_full_yearly_norm --country Switzerland --max-combinations -1
 
 # Quick test with limited combos
-python 1_build_segments.py --run-name test_run --max-sites 3 --max-combinations 5
+python 1_build_segments.py --run-name swiss_test_yearly_norm --max-sites 3 --max-combinations 5
 
 # Build with specific sites
 python 1_build_segments.py --run-name specific_sites --force-sites 3,4,10
 
 # Build with verbose output (shows file saves)
 python 1_build_segments.py --run-name verbose_run --verbose
+```
+
+### Key Script: 2_train_model.py
+
+#### Example Commands
+```bash
+# Train with default settings
+python 2_train_model.py --epochs 100 --batch-size 16 --verbose
+
+# Train with custom paths
+python 2_train_model.py \
+    --data-dir /storage/lukovic/Data/FORWARDS/treenet/processed/swiss_full_yearly_norm/model_data \
+    --output-dir /storage/lukovic/Data/FORWARDS/treenet/processed/swiss_full_yearly_norm/experiments \
+    --epochs 100 --batch-size 16
+
+# Train on specific GPU
+CUDA_VISIBLE_DEVICES=1 python 2_train_model.py --epochs 100 --batch-size 16
 ```
 
 ### Key Script: 6_reconstruct_timeseries.py
@@ -349,7 +461,7 @@ python 6_reconstruct_timeseries.py --site-id 3 --model-path /path/to/model.keras
 
 ---
 
-## 10. Known Technical Issues & Design Decisions
+## 12. Known Technical Issues & Design Decisions
 
 This section documents important technical challenges and the rationale behind design decisions.
 
@@ -364,7 +476,7 @@ This section documents important technical challenges and the rationale behind d
 - The signal should be shifted to 100% (sensor degradation)
 - The relative humidity is genuinely at that lower value (real measurement)
 
-**Future Goal**: The model should eventually be able to detect and correct these drift patterns. This is one motivation for using longer input segments (see Issue 3).
+**Future Goal**: The model should eventually be able to detect and correct these drift patterns. This is one motivation for using longer input segments (see Issue 2).
 
 **Current Status**: Not yet addressed - requires model enhancement
 
@@ -510,7 +622,7 @@ except Exception as e:
 
 ---
 
-## 11. Common Code Issues & Solutions
+## 13. Common Code Issues & Solutions
 
 ### Issue 1: Timestamp Alignment
 **Problem**: Segment start not aligned to 10-minute grid
@@ -539,29 +651,22 @@ predictions = model.predict([input_data, mask])
 
 ---
 
-## 12. Performance Metrics
+## 14. GPU & Hardware
 
-### Current Best Results (Site 3 test)
-- **Fill rate**: 87% (76/87 gaps filled)
-- **MAE**: 49.14 μm
-- **Skipped gaps**: 11 (near data boundaries)
-
-### Training Dataset (old, 25 sites)
-- Train segments: 25,896
-- Test segments: ~5,000
-- Early stopping: Epoch 16
-
----
-
-## 13. GPU & Hardware
-
-- **Available GPUs**: 6x NVIDIA RTX 3090
-- **Default GPU**: GPU 0
+- **Available GPUs**: 6x NVIDIA RTX 3090 (24GB each)
 - **Check availability**: `nvidia-smi`
+- **Select GPU**: `CUDA_VISIBLE_DEVICES=1 python ...`
+
+### GPU Memory Requirements
+| Batch Size | Memory Used | Notes |
+|------------|-------------|-------|
+| 64 | ~22+ GB | OOM on single GPU |
+| 32 | ~14 GB | Works on single GPU |
+| 16 | ~8 GB | Safe for single GPU |
 
 ---
 
-## 14. Quick Reference Commands
+## 15. Quick Reference Commands
 
 ```bash
 # Activate environment
@@ -570,11 +675,14 @@ source /home/lukovic/pyenv/lamella/bin/activate
 # Navigate to pipeline
 cd /home/lukovic/codes/treenetai/pipeline_v2
 
-# Build segments (all Swiss sites)
-python 1_build_segments.py --max-sites -1 --country Switzerland
+# Build segments (all Swiss sites, yearly normalization)
+python 1_build_segments.py --run-name swiss_full_yearly_norm --country Switzerland --max-combinations -1
 
-# Train model
-python 3_train_model.py --data-dir /path/to/processed
+# Train model (on GPU 1, batch size 16)
+CUDA_VISIBLE_DEVICES=1 python 2_train_model.py \
+    --data-dir /storage/lukovic/Data/FORWARDS/treenet/processed/swiss_full_yearly_norm/model_data \
+    --output-dir /storage/lukovic/Data/FORWARDS/treenet/processed/swiss_full_yearly_norm/experiments \
+    --epochs 100 --batch-size 16 --verbose
 
 # Reconstruct time series
 python 6_reconstruct_timeseries.py --site-id 3
@@ -585,13 +693,14 @@ nvidia-smi
 
 ---
 
-## 15. Session Continuity Checklist
+## 16. Session Continuity Checklist
 
 When starting a new session, verify:
 1. ☐ Python environment: `/home/lukovic/pyenv/lamella/bin/python`
 2. ☐ Data paths exist and are accessible
 3. ☐ GPU available if training
 4. ☐ Review recent changes in git
+5. ☐ Check current dataset: `/storage/lukovic/Data/FORWARDS/treenet/processed/swiss_full_yearly_norm/`
 
 ---
 

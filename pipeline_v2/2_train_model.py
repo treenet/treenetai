@@ -33,13 +33,13 @@ def parse_args():
     parser.add_argument(
         '--data-dir',
         type=str,
-        default='/storage/lukovic/Data/FORWARDS/treenet/processed/model_data',
+        default='/storage/lukovic/Data/FORWARDS/treenet/processed/swiss_full_yearly_norm/model_data',
         help='Directory with processed segment files'
     )
     parser.add_argument(
         '--output-dir',
         type=str,
-        default='./experiments',
+        default='/storage/lukovic/Data/FORWARDS/treenet/processed/swiss_full_yearly_norm/experiments',
         help='Base directory for experiment outputs'
     )
     parser.add_argument(

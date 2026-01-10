@@ -345,7 +345,7 @@ class ModelTrainer:
             y_test: Test target data
             
         Returns:
-            Dictionary of evaluation metrics
+            Dictionary of evaluation metrics (MAE, MSE, R²)
         """
         if self.model is None:
             raise ValueError("Model must be trained first")
@@ -359,24 +359,57 @@ class ModelTrainer:
         recon_pred = predictions[0]  # Reconstruction output
         hourly_pred = predictions[1]  # Hourly output
         
+        def compute_r2(y_true, y_pred):
+            """Compute R² (coefficient of determination)."""
+            ss_res = np.sum((y_true - y_pred) ** 2)
+            ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
+            if ss_tot == 0:
+                return 0.0
+            return float(1.0 - (ss_res / ss_tot))
+        
         # Compute metrics for reconstruction
         recon_metrics = {}
         for i, ch_name in enumerate(self.config.data.input_channels):
-            mae = np.mean(np.abs(X_test[..., i] - recon_pred[..., i]))
+            y_true = X_test[..., i].flatten()
+            y_pred = recon_pred[..., i].flatten()
+            
+            mae = np.mean(np.abs(y_true - y_pred))
+            mse = np.mean((y_true - y_pred) ** 2)
+            r2 = compute_r2(y_true, y_pred)
+            
             recon_metrics[f'recon_{ch_name}_mae'] = float(mae)
+            recon_metrics[f'recon_{ch_name}_mse'] = float(mse)
+            recon_metrics[f'recon_{ch_name}_r2'] = float(r2)
         
         # Compute metrics for hourly prediction
         hourly_metrics = {}
         for i, ch_name in enumerate(self.config.data.target_channels):
-            mae = np.mean(np.abs(y_test[..., i] - hourly_pred[..., i]))
+            y_true = y_test[..., i].flatten()
+            y_pred = hourly_pred[..., i].flatten()
+            
+            mae = np.mean(np.abs(y_true - y_pred))
+            mse = np.mean((y_true - y_pred) ** 2)
+            r2 = compute_r2(y_true, y_pred)
+            
             hourly_metrics[f'hourly_{ch_name}_mae'] = float(mae)
+            hourly_metrics[f'hourly_{ch_name}_mse'] = float(mse)
+            hourly_metrics[f'hourly_{ch_name}_r2'] = float(r2)
         
         all_metrics = {**recon_metrics, **hourly_metrics}
         
-        # Print summary
+        # Print summary (MAE and R² for brevity)
         print("\nEvaluation Results:")
-        for key, value in all_metrics.items():
-            print(f"  {key}: {value:.6f}")
+        print("\nReconstruction Metrics (11 channels):")
+        for ch_name in self.config.data.input_channels:
+            mae = recon_metrics[f'recon_{ch_name}_mae']
+            r2 = recon_metrics[f'recon_{ch_name}_r2']
+            print(f"  {ch_name:15s}: MAE={mae:.4f}, R²={r2:.4f}")
+        
+        print("\nHourly Prediction Metrics (3 channels):")
+        for ch_name in self.config.data.target_channels:
+            mae = hourly_metrics[f'hourly_{ch_name}_mae']
+            r2 = hourly_metrics[f'hourly_{ch_name}_r2']
+            print(f"  {ch_name:15s}: MAE={mae:.4f}, R²={r2:.4f}")
         
         return all_metrics
     
