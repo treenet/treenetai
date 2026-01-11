@@ -5,11 +5,15 @@ Data loading utilities for TreeNet sensor data.
 from __future__ import annotations
 import os
 import re
+import logging
 from pathlib import Path
 from typing import Dict, Tuple, Optional
 import pandas as pd
 import numpy as np
 import pickle
+
+# Module-level logger
+_logger = logging.getLogger('treenet.loaders')
 
 
 class DataLoaders:
@@ -65,7 +69,7 @@ class DataLoaders:
             df = pd.read_feather(file_path)
             return df[['ts', 'series', 'value']]
         except Exception as e:
-            print(f"Error loading thermometer {series_id}: {e}")
+            _logger.warning(f"Error loading thermometer {series_id}: {e}")
             return None
     
     def load_hygrometer_l1(self, series_id: int) -> Optional[pd.DataFrame]:
@@ -87,7 +91,7 @@ class DataLoaders:
             df = pd.read_feather(file_path)
             return df[['ts', 'series', 'value']]
         except Exception as e:
-            print(f"Error loading hygrometer {series_id}: {e}")
+            _logger.warning(f"Error loading hygrometer {series_id}: {e}")
             return None
     
     def load_dendrometer_l2(self, series_id: int) -> Optional[pd.DataFrame]:
@@ -110,7 +114,7 @@ class DataLoaders:
             # Keep only essential columns
             return df[['ts', 'series', 'value']]
         except Exception as e:
-            print(f"Error loading dendrometer L2 {series_id}: {e}")
+            _logger.warning(f"Error loading dendrometer L2 {series_id}: {e}")
             return None
     
     def load_dendrometer_lm(self, series_id: int) -> Optional[pd.DataFrame]:
@@ -138,7 +142,7 @@ class DataLoaders:
                 cols.append('rh')
             return df[cols]
         except Exception as e:
-            print(f"Error loading dendrometer LM {series_id}: {e}")
+            _logger.warning(f"Error loading dendrometer LM {series_id}: {e}")
             return None
     
     def load_meteotest_data(self, site_id: int) -> Optional[pd.DataFrame]:
@@ -185,7 +189,7 @@ class DataLoaders:
             
             return df[required_cols]
         except Exception as e:
-            print(f"Error loading meteotest for site {site_id}: {e}")
+            _logger.warning(f"Error loading meteotest for site {site_id}: {e}")
             return None
     
     def discover_meteo_files(self) -> Dict[int, Path]:

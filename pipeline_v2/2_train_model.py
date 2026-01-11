@@ -79,23 +79,24 @@ def main():
     """Main function."""
     args = parse_args()
     
-    print("="*80)
-    print("TreeNet AI Pipeline v2 - Model Training")
-    print("="*80)
-    
-    # Create experiment directory
+    # Create experiment directory first
     exp_dir = create_experiment_dir(
         base_dir=Path(args.output_dir),
         experiment_name=args.experiment_name
     )
     
-    print(f"\nExperiment directory: {exp_dir}")
+    # Setup logging - single log file for all output
+    log_file = exp_dir / 'training.log'
+    log = setup_logging(log_file=log_file, name='train_model', verbose=args.verbose)
     
-    # Setup logging
-    setup_logging(verbose=args.verbose, log_file=exp_dir / 'training.log')
+    log.info("="*80)
+    log.info("TreeNet AI Pipeline v2 - Model Training")
+    log.info("="*80)
+    log.info(f"Experiment directory: {exp_dir}")
+    log.info(f"Log file: {log_file}")
     
     # Create configuration
-    print("\nConfiguration:")
+    log.info("\nConfiguration:")
     config = PipelineConfig()
     
     # Update model config
@@ -119,31 +120,31 @@ def main():
     
     config.verbose = args.verbose
     
-    print(f"  Model: TCN with {args.n_blocks} blocks, {args.n_filters} filters")
+    log.info(f"  Model: TCN with {args.n_blocks} blocks, {args.n_filters} filters")
     if args.use_attention:
-        print(f"  Attention: {args.n_attention_heads} heads, key_dim={args.attention_key_dim}")
+        log.info(f"  Attention: {args.n_attention_heads} heads, key_dim={args.attention_key_dim}")
     else:
-        print(f"  Attention: disabled")
-    print(f"  Training: {args.epochs} epochs, batch size {args.batch_size}")
-    print(f"  Gap injection: {'enabled' if config.gap.enabled else 'disabled'}")
+        log.info(f"  Attention: disabled")
+    log.info(f"  Training: {args.epochs} epochs, batch size {args.batch_size}")
+    log.info(f"  Gap injection: {'enabled' if config.gap.enabled else 'disabled'}")
     if config.gap.enabled:
-        print(f"    Gap range: {args.min_gap_days}-{args.max_gap_days} days")
+        log.info(f"    Gap range: {args.min_gap_days}-{args.max_gap_days} days")
     
     # Initialize trainer
-    print("\nInitializing trainer...")
+    log.info("\nInitializing trainer...")
     trainer = ModelTrainer(config=config, output_dir=exp_dir)
     
     # Run training pipeline
-    print("\nStarting training pipeline...")
+    log.info("\nStarting training pipeline...")
     metrics = trainer.run_full_pipeline(data_dir=Path(args.data_dir))
     
-    print("\n" + "="*80)
-    print("Training complete!")
-    print(f"Results saved to: {exp_dir}")
-    print("\nFinal metrics:")
+    log.info("\n" + "="*80)
+    log.info("Training complete!")
+    log.info(f"Results saved to: {exp_dir}")
+    log.info("\nFinal metrics:")
     for key, value in metrics.items():
-        print(f"  {key}: {value:.6f}")
-    print("="*80)
+        log.info(f"  {key}: {value:.6f}")
+    log.info("="*80)
 
 
 if __name__ == '__main__':

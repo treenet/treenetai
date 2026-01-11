@@ -48,6 +48,25 @@ class SegmentMetadata:
     target_channels: List[str]
 
 
+@dataclass
+class FilteredYearInfo:
+    """
+    Information about a filtered (excluded) year.
+    
+    Attributes:
+        year: The filtered year
+        reason: Reason for filtering
+        ratio: The computed output_diff/input_diff ratio
+        input_range: Input stem range for this year
+        output_range: Output stem range for this year
+    """
+    year: int
+    reason: str
+    ratio: float
+    input_range: float
+    output_range: float
+
+
 class Normalizer:
     """
     Handles normalization for consistent scaling.
@@ -58,7 +77,14 @@ class Normalizer:
     
     For stem radius channel, special handling is applied to align input and output
     scales since they come from different data sources (dendrometer_l2 vs dendrometer_lm).
+    
+    Data quality filtering is automatically applied to detect incompatible input/output
+    signals (e.g., sensor issues causing vastly different scales between L2 and LM data).
     """
+    
+    # Default thresholds for data quality filtering
+    DEFAULT_RATIO_MIN = 0.5  # Minimum acceptable output_diff/input_diff ratio
+    DEFAULT_RATIO_MAX = 2.0  # Maximum acceptable output_diff/input_diff ratio
     
     def __init__(self, norm_scope: str = 'year'):
         """
@@ -70,6 +96,123 @@ class Normalizer:
         self.norm_scope = norm_scope
     
     @staticmethod
+    def check_stem_quality(
+        input_stem: pd.Series,
+        output_stem: pd.Series,
+        year: Optional[int] = None,
+        ratio_min: float = DEFAULT_RATIO_MIN,
+        ratio_max: float = DEFAULT_RATIO_MAX
+    ) -> Tuple[bool, float, str, float, float]:
+        """
+        Check data quality for stem signals.
+        
+        Detects incompatible input/output signals where the ranges differ
+        significantly, indicating sensor issues (e.g., L2 sensor problems
+        while LM data was cleaned from a different source).
+        
+        Args:
+            input_stem: Input stem Series (10-min resolution)
+            output_stem: Output stem Series (hourly resolution)
+            year: Optional year to filter data to
+            ratio_min: Minimum acceptable output_diff/input_diff ratio
+            ratio_max: Maximum acceptable output_diff/input_diff ratio
+            
+        Returns:
+            Tuple of (is_valid, ratio, reason_string, input_range, output_range)
+            - is_valid: True if data passes quality check
+            - ratio: The computed output_diff/input_diff ratio
+            - reason: Human-readable reason if invalid
+            - input_range: Range of input stem signal
+            - output_range: Range of output stem signal
+        """
+        # Filter to specific year if provided
+        if year is not None:
+            input_data = input_stem[input_stem.index.year == year].dropna()
+            output_data = output_stem[output_stem.index.year == year].dropna()
+        else:
+            input_data = input_stem.dropna()
+            output_data = output_stem.dropna()
+        
+        if len(input_data) == 0 or len(output_data) == 0:
+            return False, 0.0, "No valid data", 0.0, 0.0
+        
+        # Compute ranges
+        input_range = float(input_data.max() - input_data.min())
+        output_range = float(output_data.max() - output_data.min())
+        
+        if input_range < 1e-8:
+            return False, 0.0, "Input range is zero/constant", input_range, output_range
+        
+        ratio = output_range / input_range
+        
+        if ratio < ratio_min:
+            return False, ratio, f"Ratio {ratio:.3f} < {ratio_min} (input has outliers/spikes)", input_range, output_range
+        
+        if ratio > ratio_max:
+            return False, ratio, f"Ratio {ratio:.3f} > {ratio_max} (output has outliers or input is too smooth)", input_range, output_range
+        
+        return True, ratio, "OK", input_range, output_range
+    
+    @classmethod
+    def filter_valid_years(
+        cls,
+        input_stem: pd.Series,
+        output_stem: pd.Series,
+        ratio_min: float = None,
+        ratio_max: float = None,
+        verbose: bool = False
+    ) -> Tuple[List[int], Dict[int, str]]:
+        """
+        Filter years to only those with valid data quality.
+        
+        Args:
+            input_stem: Input stem Series (10-min resolution)
+            output_stem: Output stem Series (hourly resolution)
+            ratio_min: Minimum acceptable ratio (default: DEFAULT_RATIO_MIN)
+            ratio_max: Maximum acceptable ratio (default: DEFAULT_RATIO_MAX)
+            verbose: Print details for each year
+            
+        Returns:
+            Tuple of (valid_years, filtered_info)
+            - valid_years: List of years that passed quality check
+            - filtered_info: List of FilteredYearInfo for filtered years
+        """
+        if ratio_min is None:
+            ratio_min = cls.DEFAULT_RATIO_MIN
+        if ratio_max is None:
+            ratio_max = cls.DEFAULT_RATIO_MAX
+        
+        # Get years present in both signals
+        input_years = set(input_stem.dropna().index.year.unique())
+        output_years = set(output_stem.dropna().index.year.unique())
+        common_years = sorted(input_years & output_years)
+        
+        valid_years = []
+        filtered_info = []
+        
+        for year in common_years:
+            is_valid, ratio, reason, input_range, output_range = cls.check_stem_quality(
+                input_stem, output_stem, year, ratio_min, ratio_max
+            )
+            
+            if is_valid:
+                valid_years.append(year)
+                if verbose:
+                    print(f"  Year {year}: VALID (ratio={ratio:.3f})")
+            else:
+                filtered_info.append(FilteredYearInfo(
+                    year=year,
+                    reason=reason,
+                    ratio=ratio,
+                    input_range=input_range,
+                    output_range=output_range
+                ))
+                if verbose:
+                    print(f"  Year {year}: FILTERED - {reason}")
+        
+        return valid_years, filtered_info
+    
+    @staticmethod
     def align_stem_signals_yearly(
         input_stem: pd.Series,
         output_stem: pd.Series
@@ -78,16 +221,26 @@ class Normalizer:
         Align input and output stem signals for consistent normalization.
         
         This addresses the issue where input stem (from dendrometer_l2) and 
-        output stem (from dendrometer_lm) have different baseline values.
+        output stem (from dendrometer_lm) have different baseline values and
+        potentially different temporal coverage.
         
         Process for each year:
         1. Find first common valid timestamp where both signals have non-NaN values
         2. Shift both signals so they start from zero at this timestamp
-        3. Find last common valid timestamp near year end
-        4. Compute normalization params from the aligned interval
+        3. Compute normalization params from ONLY the common time range where
+           BOTH signals have valid data FOR THAT YEAR
+        4. Each signal uses its OWN min/max from the common range (independent normalization)
+        5. Store per-year normalization parameters separately
         
-        The starting point (offset) of stem radius is physically irrelevant,
-        so this alignment preserves physical meaning while enabling consistent normalization.
+        The key insight is that:
+        - The starting point (offset) of stem radius is physically irrelevant
+        - By shifting both to zero at the same starting point, the min values will be 
+          similar (~0) after alignment
+        - The max values (and thus diff) may differ slightly due to noise differences
+          between L2 and LM signals, but should be close since they measure the same tree
+        - Each signal MUST be normalized independently because during inference,
+          only the INPUT signal is available (no ground truth output)
+        - Per-year normalization avoids outlier years affecting other years
         
         Args:
             input_stem: Input stem Series (10-min resolution)
@@ -95,7 +248,7 @@ class Normalizer:
             
         Returns:
             Tuple of (aligned_input_stem, aligned_output_stem, 
-                      input_min, input_diff, output_min, output_diff)
+                      yearly_norm_params: Dict[year, (input_min, input_diff, output_min, output_diff)])
         """
         # Group by year
         input_years = input_stem.index.year.unique()
@@ -103,15 +256,14 @@ class Normalizer:
         common_years = sorted(set(input_years) & set(output_years))
         
         if len(common_years) == 0:
-            # No overlap - fall back to independent normalization
-            return input_stem, output_stem, None, None, None, None
+            # No overlap - return empty dict for norm params
+            return input_stem, output_stem, {}
         
         aligned_input = input_stem.copy()
         aligned_output = output_stem.copy()
         
-        # Track all shifts for consistency check
-        all_input_shifts = []
-        all_output_shifts = []
+        # Store per-year normalization parameters
+        yearly_norm_params = {}
         
         for year in common_years:
             # Get year slices
@@ -135,7 +287,6 @@ class Normalizer:
                 continue
             
             first_common = common_times[0]
-            last_common = common_times[-1]
             
             # Get values at first common timestamp
             # For input, get the value at the hour mark
@@ -154,29 +305,45 @@ class Normalizer:
             aligned_input.loc[input_year_mask] = input_stem[input_year_mask] - input_shift
             aligned_output.loc[output_year_mask] = output_stem[output_year_mask] - output_shift
             
-            all_input_shifts.append(input_shift)
-            all_output_shifts.append(output_shift)
+            # Compute normalization params from COMMON TIME RANGE for THIS YEAR only
+            aligned_input_year = aligned_input[input_year_mask].dropna()
+            aligned_output_year = aligned_output[output_year_mask].dropna()
+            
+            if len(aligned_input_year) == 0 or len(aligned_output_year) == 0:
+                continue
+            
+            # Find timestamps where BOTH signals have valid data for this year
+            input_hourly = aligned_input_year.groupby(aligned_input_year.index.floor('h')).first()
+            common_timestamps = input_hourly.index.intersection(aligned_output_year.index)
+            
+            if len(common_timestamps) == 0:
+                # Fall back to using all valid data independently for this year
+                input_vals = aligned_input_year
+                output_vals = aligned_output_year
+            else:
+                # Use only the common time range for this year
+                input_vals = input_hourly.loc[common_timestamps]
+                output_vals = aligned_output_year.loc[common_timestamps]
+            
+            # Compute normalization independently for each signal
+            input_min = float(input_vals.min())
+            input_max = float(input_vals.max())
+            input_diff = input_max - input_min
+            
+            output_min = float(output_vals.min())
+            output_max = float(output_vals.max())
+            output_diff = output_max - output_min
+            
+            # Safety check for near-zero diff
+            if input_diff < 1e-8:
+                input_diff = 1.0
+            if output_diff < 1e-8:
+                output_diff = 1.0
+            
+            # Store year-specific params
+            yearly_norm_params[year] = (input_min, input_diff, output_min, output_diff)
         
-        # Compute normalization params from aligned signals
-        input_vals = aligned_input.dropna()
-        output_vals = aligned_output.dropna()
-        
-        if len(input_vals) == 0 or len(output_vals) == 0:
-            return input_stem, output_stem, None, None, None, None
-        
-        input_min = float(input_vals.min())
-        input_max = float(input_vals.max())
-        input_diff = input_max - input_min
-        if input_diff < 1e-8:
-            input_diff = 1.0
-        
-        output_min = float(output_vals.min())
-        output_max = float(output_vals.max())
-        output_diff = output_max - output_min
-        if output_diff < 1e-8:
-            output_diff = 1.0
-        
-        return aligned_input, aligned_output, input_min, input_diff, output_min, output_diff
+        return aligned_input, aligned_output, yearly_norm_params
     
     @staticmethod
     def compute_normalization_params(
@@ -494,7 +661,7 @@ class SegmentBuilder:
         output_df: pd.DataFrame,
         input_channels: List[str],
         target_channels: List[str]
-    ) -> Tuple[List[pd.DataFrame], List[pd.DataFrame], List[SegmentMetadata]]:
+    ) -> Tuple[List[pd.DataFrame], List[pd.DataFrame], List[SegmentMetadata], List[FilteredYearInfo]]:
         """
         Build normalized segments for a single sensor combination.
         
@@ -527,19 +694,30 @@ class SegmentBuilder:
             - List of input segment DataFrames
             - List of output segment DataFrames
             - List of SegmentMetadata objects
+            - List of FilteredYearInfo for filtered years
         """
         input_segments = []
         output_segments = []
         metadata_list = []
         
+        # Apply data quality filtering for stem channel if present
+        filtered_years_info = []
+        if 'stem' in input_df.columns and 'stem' in output_df.columns:
+            valid_years_quality, filtered_years_info = Normalizer.filter_valid_years(
+                input_df['stem'], output_df['stem'], verbose=False
+            )
+        else:
+            valid_years_quality = None  # No filtering needed if no stem channel
+        
         if self.norm_scope == 'year':
             # Year-level normalization with aligned stem handling
+            # Segments are extracted PER-YEAR to use year-specific normalization parameters
+            # This avoids outlier years affecting other years' normalization
             
             # 1. Handle stem channel specially - align input and output scales
             if 'stem' in input_df.columns and 'stem' in output_df.columns:
                 (aligned_input_stem, aligned_output_stem,
-                 stem_input_min, stem_input_diff,
-                 stem_output_min, stem_output_diff) = self.normalizer.align_stem_signals_yearly(
+                 yearly_stem_norm_params) = self.normalizer.align_stem_signals_yearly(
                     input_df['stem'], output_df['stem']
                 )
                 
@@ -551,88 +729,134 @@ class SegmentBuilder:
             else:
                 input_df_aligned = input_df
                 output_df_aligned = output_df
-                stem_input_min, stem_input_diff = None, None
-                stem_output_min, stem_output_diff = None, None
+                yearly_stem_norm_params = {}
             
-            # 2. Compute normalization parameters for all channels
-            input_min, input_diff = self.normalizer.compute_normalization_params(
-                input_df_aligned, self.norm_method
-            )
-            output_min, output_diff = self.normalizer.compute_normalization_params(
-                output_df_aligned, self.norm_method
-            )
+            # Get years with valid stem normalization params
+            valid_years = list(yearly_stem_norm_params.keys())
             
-            # Use aligned stem params if computed
-            if stem_input_min is not None:
-                input_min['stem'] = stem_input_min
-                input_diff['stem'] = stem_input_diff
-            if stem_output_min is not None:
-                output_min['stem'] = stem_output_min
-                output_diff['stem'] = stem_output_diff
+            # If no stem alignment worked, fall back to all years
+            if not valid_years:
+                valid_years = sorted(set(input_df.index.year) & set(output_df.index.year))
             
-            # 3. Normalize full data
-            input_normalized = self.normalizer.normalize(
-                input_df_aligned, input_min, input_diff
-            )
-            output_normalized = self.normalizer.normalize(
-                output_df_aligned, output_min, output_diff
-            )
+            # Apply data quality filtering - only keep years that passed quality check
+            if valid_years_quality is not None:
+                valid_years = [y for y in valid_years if y in valid_years_quality]
             
-            # 3. Find valid segments
-            segment_windows = self.extractor.find_complete_segments(
-                input_normalized, output_normalized, verbose=False
-            )
-            
-            # 4. Extract segments and create metadata
-            for seg_idx, (start, end) in enumerate(segment_windows):
-                # Extract segments
-                input_seg = self.extractor.extract_segment(
-                    input_normalized, start, end
+            # 2. Process each year separately
+            for year in valid_years:
+                # Get year slices
+                input_year_mask = input_df_aligned.index.year == year
+                output_year_mask = output_df_aligned.index.year == year
+                
+                input_year_df = input_df_aligned[input_year_mask].copy()
+                output_year_df = output_df_aligned[output_year_mask].copy()
+                
+                if len(input_year_df) == 0 or len(output_year_df) == 0:
+                    continue
+                
+                # 3. Compute normalization parameters for this year's non-stem channels
+                input_min, input_diff = self.normalizer.compute_normalization_params(
+                    input_year_df, self.norm_method
                 )
-                output_seg = self.extractor.extract_segment(
-                    output_normalized, start, end
+                output_min, output_diff = self.normalizer.compute_normalization_params(
+                    output_year_df, self.norm_method
                 )
                 
-                # Create metadata with year-level normalization params
-                metadata = SegmentMetadata(
-                    combo_id=combo_id,
-                    segment_idx=seg_idx,
-                    site_id=site_id,
-                    thermometer_id=thermometer_id,
-                    hygrometer_id=hygrometer_id,
-                    dendrometer_id=dendrometer_id,
-                    window_start_utc=start,
-                    window_end_utc=end,
-                    input_min=input_min,
-                    input_diff=input_diff,
-                    output_min=output_min,
-                    output_diff=output_diff,
-                    input_channels=input_channels,
-                    target_channels=target_channels
+                # Use aligned stem params for this year if computed
+                if year in yearly_stem_norm_params:
+                    stem_input_min, stem_input_diff, stem_output_min, stem_output_diff = yearly_stem_norm_params[year]
+                    input_min['stem'] = stem_input_min
+                    input_diff['stem'] = stem_input_diff
+                    output_min['stem'] = stem_output_min
+                    output_diff['stem'] = stem_output_diff
+                
+                # 4. Normalize this year's data
+                input_year_normalized = self.normalizer.normalize(
+                    input_year_df, input_min, input_diff
+                )
+                output_year_normalized = self.normalizer.normalize(
+                    output_year_df, output_min, output_diff
                 )
                 
-                input_segments.append(input_seg)
-                output_segments.append(output_seg)
-                metadata_list.append(metadata)
+                # 5. Find valid segments within this year only
+                year_segment_windows = self.extractor.find_complete_segments(
+                    input_year_normalized, output_year_normalized, verbose=False
+                )
+                
+                # 6. Extract segments and create metadata
+                for seg_idx_in_year, (start, end) in enumerate(year_segment_windows):
+                    # Use global segment index
+                    seg_idx = len(input_segments)
+                    
+                    # Extract segments
+                    input_seg = self.extractor.extract_segment(
+                        input_year_normalized, start, end
+                    )
+                    output_seg = self.extractor.extract_segment(
+                        output_year_normalized, start, end
+                    )
+                    
+                    # Create metadata with year-specific normalization params
+                    metadata = SegmentMetadata(
+                        combo_id=combo_id,
+                        segment_idx=seg_idx,
+                        site_id=site_id,
+                        thermometer_id=thermometer_id,
+                        hygrometer_id=hygrometer_id,
+                        dendrometer_id=dendrometer_id,
+                        window_start_utc=start,
+                        window_end_utc=end,
+                        input_min=input_min.copy(),
+                        input_diff=input_diff.copy(),
+                        output_min=output_min.copy(),
+                        output_diff=output_diff.copy(),
+                        input_channels=input_channels,
+                        target_channels=target_channels
+                    )
+                    
+                    input_segments.append(input_seg)
+                    output_segments.append(output_seg)
+                    metadata_list.append(metadata)
         
         elif self.norm_scope == 'segment':
-            # Segment-level normalization (new approach)
-            # 1. Find valid segments from raw (non-normalized) data
+            # Segment-level normalization
+            # Each segment is normalized independently using its own min/max
+            # This allows segments to cross year boundaries (Dec-Jan)
+            
+            # Data quality filter: exclude years with bad L2/LM ratio
+            # But segments can still span across valid years
+            if valid_years_quality is not None:
+                # Create masks for valid years only
+                input_year = input_df.index.year
+                output_year = output_df.index.year
+                
+                input_valid_mask = input_year.isin(valid_years_quality)
+                output_valid_mask = output_year.isin(valid_years_quality)
+                
+                # Filter to valid years
+                input_filtered = input_df[input_valid_mask].copy()
+                output_filtered = output_df[output_valid_mask].copy()
+            else:
+                input_filtered = input_df
+                output_filtered = output_df
+            
+            # 1. Find valid segments from FULL filtered data (allowing cross-year boundaries)
             segment_windows = self.extractor.find_complete_segments(
-                input_df, output_df, verbose=False
+                input_filtered, output_filtered, verbose=False
             )
             
             # 2. Extract and normalize each segment individually
             for seg_idx, (start, end) in enumerate(segment_windows):
                 # Extract raw segments
                 input_seg_raw = self.extractor.extract_segment(
-                    input_df, start, end
+                    input_filtered, start, end
                 )
                 output_seg_raw = self.extractor.extract_segment(
-                    output_df, start, end
+                    output_filtered, start, end
                 )
                 
                 # Compute segment-specific normalization parameters
+                # Each segment uses its OWN min/max values
                 input_min, input_diff = self.normalizer.compute_normalization_params(
                     input_seg_raw, self.norm_method
                 )
@@ -658,10 +882,10 @@ class SegmentBuilder:
                     dendrometer_id=dendrometer_id,
                     window_start_utc=start,
                     window_end_utc=end,
-                    input_min=input_min,
-                    input_diff=input_diff,
-                    output_min=output_min,
-                    output_diff=output_diff,
+                    input_min=input_min.copy(),
+                    input_diff=input_diff.copy(),
+                    output_min=output_min.copy(),
+                    output_diff=output_diff.copy(),
                     input_channels=input_channels,
                     target_channels=target_channels
                 )
@@ -673,9 +897,7 @@ class SegmentBuilder:
         else:
             raise ValueError(f"Unknown norm_scope: {self.norm_scope}. Must be 'year' or 'segment'")
         
-        return input_segments, output_segments, metadata_list
-        
-        return input_segments, output_segments, metadata_list
+        return input_segments, output_segments, metadata_list, filtered_years_info
     
     def segments_to_numpy(
         self,

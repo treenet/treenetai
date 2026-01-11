@@ -10,10 +10,12 @@ import tensorflow as tf
 from tensorflow import keras
 import pickle
 import json
+import logging
 from datetime import datetime
 
 from ..gaps.gap_injection import GapInjector
 from ..gaps.metrics import GapFillingMetrics
+from ..utils import get_logger
 
 
 class SegmentNormalizer:
@@ -287,6 +289,9 @@ class ModelTrainer:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
+        # Get logger (uses logger set up by main script)
+        self.log = get_logger('train_model')
+        
         self.model = None
         self.history = None
         self.gap_injector = None
@@ -315,22 +320,22 @@ class ModelTrainer:
         Returns:
             Tuple of (X_train, y_train, X_test, y_test)
         """
-        print("Loading training data...")
+        self.log.info("Loading training data...")
         with open(data_dir / 'train_input_segments_numpy.pkl', 'rb') as f:
             X_train = pickle.load(f)
         
         with open(data_dir / 'train_output_segments_numpy.pkl', 'rb') as f:
             y_train = pickle.load(f)
         
-        print("Loading test data...")
+        self.log.info("Loading test data...")
         with open(data_dir / 'test_input_segments_numpy.pkl', 'rb') as f:
             X_test = pickle.load(f)
         
         with open(data_dir / 'test_output_segments_numpy.pkl', 'rb') as f:
             y_test = pickle.load(f)
         
-        print(f"Train: X={X_train.shape}, y={y_train.shape}")
-        print(f"Test:  X={X_test.shape}, y={y_test.shape}")
+        self.log.info(f"Train: X={X_train.shape}, y={y_train.shape}")
+        self.log.info(f"Test:  X={X_test.shape}, y={y_test.shape}")
         
         return X_train, y_train, X_test, y_test
     
@@ -343,7 +348,7 @@ class ModelTrainer:
         """
         from ..models.tcn import TCNModel
         
-        print("Building TCN model...")
+        self.log.info("Building TCN model...")
         
         # Check for attention config
         use_attention = getattr(self.config.model, 'use_attention', False)
@@ -351,7 +356,7 @@ class ModelTrainer:
         attention_key_dim = getattr(self.config.model, 'attention_key_dim', 32)
         
         if use_attention:
-            print(f"  Attention: {n_attention_heads} heads, key_dim={attention_key_dim}")
+            self.log.info(f"  Attention: {n_attention_heads} heads, key_dim={attention_key_dim}")
         
         tcn = TCNModel(
             n_input_channels=self.config.data.n_input_channels,
@@ -468,10 +473,10 @@ class ModelTrainer:
         if self.model is None:
             self.build_model()
         
-        print("\nStarting training...")
-        print(f"Epochs: {self.config.model.epochs}")
-        print(f"Batch size: {self.config.model.batch_size}")
-        print(f"Gap injection: {'enabled' if self.config.gap.enabled else 'disabled'}")
+        self.log.info("\nStarting training...")
+        self.log.info(f"Epochs: {self.config.model.epochs}")
+        self.log.info(f"Batch size: {self.config.model.batch_size}")
+        self.log.info(f"Gap injection: {'enabled' if self.config.gap.enabled else 'disabled'}")
         
         # Check if segment-level normalization is enabled
         # If norm_scope='segment', data is raw and needs on-the-fly normalization
@@ -479,9 +484,9 @@ class ModelTrainer:
         norm_on_fly = (norm_scope == 'segment')
         
         if norm_on_fly:
-            print(f"Normalization: on-the-fly (segment-level, gap-aware)")
+            self.log.info(f"Normalization: on-the-fly (segment-level, gap-aware)")
         else:
-            print(f"Normalization: pre-computed (year-level)")
+            self.log.info(f"Normalization: pre-computed (year-level)")
         
         # Create data generators
         train_gen = DataGenerator(
@@ -531,7 +536,7 @@ class ModelTrainer:
         if self.model is None:
             raise ValueError("Model must be trained first")
         
-        print("\nEvaluating model on test set...")
+        self.log.info("\nEvaluating model on test set...")
         
         # Generate predictions without gaps
         masks = np.ones_like(X_test)
@@ -579,25 +584,25 @@ class ModelTrainer:
         all_metrics = {**recon_metrics, **hourly_metrics}
         
         # Print summary (MAE and R² for brevity)
-        print("\nEvaluation Results:")
-        print("\nReconstruction Metrics (11 channels):")
+        self.log.info("\nEvaluation Results:")
+        self.log.info("\nReconstruction Metrics (11 channels):")
         for ch_name in self.config.data.input_channels:
             mae = recon_metrics[f'recon_{ch_name}_mae']
             r2 = recon_metrics[f'recon_{ch_name}_r2']
-            print(f"  {ch_name:15s}: MAE={mae:.4f}, R²={r2:.4f}")
+            self.log.info(f"  {ch_name:15s}: MAE={mae:.4f}, R²={r2:.4f}")
         
-        print("\nHourly Prediction Metrics (3 channels):")
+        self.log.info("\nHourly Prediction Metrics (3 channels):")
         for ch_name in self.config.data.target_channels:
             mae = hourly_metrics[f'hourly_{ch_name}_mae']
             r2 = hourly_metrics[f'hourly_{ch_name}_r2']
-            print(f"  {ch_name:15s}: MAE={mae:.4f}, R²={r2:.4f}")
+            self.log.info(f"  {ch_name:15s}: MAE={mae:.4f}, R²={r2:.4f}")
         
         return all_metrics
     
     def save_training_history(self):
         """Save training history to JSON file."""
         if self.history is None:
-            print("Warning: No training history to save")
+            self.log.warning("No training history to save")
             return
         
         history_path = self.output_dir / 'training_history.json'
@@ -624,7 +629,7 @@ class ModelTrainer:
         with open(history_path, 'w') as f:
             json.dump(serializable_history, f, indent=2)
         
-        print(f"Training history saved to: {history_path}")
+        self.log.info(f"Training history saved to: {history_path}")
     
     def save_config(self):
         """Save configuration to JSON file."""
@@ -647,7 +652,7 @@ class ModelTrainer:
         with open(config_path, 'w') as f:
             json.dump(config_dict, f, indent=2)
         
-        print(f"Configuration saved to: {config_path}")
+        self.log.info(f"Configuration saved to: {config_path}")
     
     def save_results(self, metrics: Dict):
         """
@@ -668,7 +673,7 @@ class ModelTrainer:
         final_model_path = self.output_dir / 'final_model.keras'
         self.model.save(str(final_model_path))
         
-        print(f"\nResults saved to: {self.output_dir}")
+        self.log.info(f"\nResults saved to: {self.output_dir}")
     
     def run_full_pipeline(self, data_dir: Path) -> Dict:
         """

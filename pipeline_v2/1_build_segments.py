@@ -25,6 +25,9 @@ import pandas as pd
 import numpy as np
 from itertools import product
 import pickle
+import matplotlib
+matplotlib.use('Agg')  # Non-interactive backend for server
+import matplotlib.pyplot as plt
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -32,9 +35,83 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.config import PipelineConfig, DataPaths, SegmentConfig
 from src.data.loaders import DataLoaders
 from src.data.processors import DataProcessor, YearGridBuilder
-from src.data.segmentation import SegmentBuilder, SegmentMetadata
+from src.data.segmentation import SegmentBuilder, SegmentMetadata, FilteredYearInfo
 from src.utils import setup_logging, ensure_dir
 from src.reporting import BuildReportCollector, save_report
+
+
+def plot_filtered_year(
+    input_df: pd.DataFrame,
+    output_df: pd.DataFrame,
+    filtered_info: FilteredYearInfo,
+    site_id: int,
+    thermo_id: int,
+    hygro_id: int,
+    dendro_id: int,
+    output_dir: Path,
+    log
+):
+    """
+    Plot and save input/output stem signals for a filtered year.
+    
+    Creates a 2-panel plot showing the raw input (L2) and output (LM) stem 
+    signals for visual inspection of why the year was filtered.
+    
+    Args:
+        input_df: Full input DataFrame with 'stem' column
+        output_df: Full output DataFrame with 'stem' column
+        filtered_info: FilteredYearInfo with year and reason
+        site_id: Site ID
+        thermo_id: Thermometer series ID
+        hygro_id: Hygrometer series ID  
+        dendro_id: Dendrometer series ID
+        output_dir: Directory to save plots
+        log: Logger instance
+    """
+    year = filtered_info.year
+    combo_str = f"site{site_id}_T{thermo_id}_H{hygro_id}_D{dendro_id}"
+    
+    # Extract year data
+    input_year = input_df[input_df.index.year == year]['stem'] if 'stem' in input_df.columns else None
+    output_year = output_df[output_df.index.year == year]['stem'] if 'stem' in output_df.columns else None
+    
+    if input_year is None or output_year is None or len(input_year) == 0 or len(output_year) == 0:
+        log.warning(f"      Cannot plot filtered year {year}: no stem data")
+        return
+    
+    # Create figure
+    fig, axes = plt.subplots(2, 1, figsize=(14, 8), sharex=True)
+    
+    # Plot input (L2) stem
+    axes[0].plot(input_year.index, input_year.values, 'b-', linewidth=0.5, alpha=0.8, label='L2 (Input)')
+    axes[0].set_ylabel('Stem Radius (µm)')
+    axes[0].set_title(f'Input Stem (L2) - Year {year}\nRange: {filtered_info.input_range:.1f} µm')
+    axes[0].legend(loc='upper right')
+    axes[0].grid(True, alpha=0.3)
+    
+    # Plot output (LM) stem
+    axes[1].plot(output_year.index, output_year.values, 'g-', linewidth=0.5, alpha=0.8, label='LM (Output)')
+    axes[1].set_ylabel('Stem Radius (µm)')
+    axes[1].set_xlabel('Date')
+    axes[1].set_title(f'Output Stem (LM) - Year {year}\nRange: {filtered_info.output_range:.1f} µm')
+    axes[1].legend(loc='upper right')
+    axes[1].grid(True, alpha=0.3)
+    
+    # Add overall title with reason
+    fig.suptitle(
+        f'FILTERED: {combo_str} - Year {year}\nReason: {filtered_info.reason}',
+        fontsize=12, fontweight='bold', color='red'
+    )
+    
+    plt.tight_layout()
+    
+    # Save plot
+    plot_filename = f"filtered_{combo_str}_year{year}.png"
+    plot_path = output_dir / plot_filename
+    plt.savefig(plot_path, dpi=100, bbox_inches='tight')
+    plt.close(fig)
+    
+    log.debug(f"      Saved filtered year plot: {plot_filename}")
 
 
 def parse_args():
@@ -149,35 +226,36 @@ def main():
     # output_root/
     #   run_name/
     #     logs/              <- log files
-    #     temp/              <- temporary files
+    #       filtered_plots/  <- plots of filtered years
     #     model_data/        <- processed segments
     #       intermediate_timeseries/
     #       segments/
     #       reports/
     run_dir = ensure_dir(Path(args.output_root) / run_name)
     log_dir = ensure_dir(run_dir / 'logs')
-    temp_dir = ensure_dir(run_dir / 'temp')
+    filtered_plots_dir = ensure_dir(log_dir / 'filtered_plots')
     output_dir = ensure_dir(run_dir / 'model_data')
     
-    # Setup logging to log file in run directory
-    log_file = log_dir / 'segment_building.log'
-    setup_logging(verbose=args.verbose, log_file=log_file)
+    # Setup logging - single log file for all output
+    log_file = log_dir / 'build_segments.log'
+    log = setup_logging(log_file=log_file, name='build_segments', verbose=args.verbose)
     
     # Determine country filter
     country_filter = None if args.country.lower() == 'all' else args.country
     
-    print("="*80)
-    print("TreeNet AI Pipeline v2 - Segment Building")
-    print("="*80)
-    print(f"Run name: {run_name}")
-    print(f"Output directory: {run_dir}")
-    print(f"Segment length: {args.segment_days} days, Stride: {args.stride_days} days")
-    print(f"Normalization scope: {args.norm_scope}")
-    print(f"Country filter: {args.country}")
-    print("="*80)
+    log.info("="*80)
+    log.info("TreeNet AI Pipeline v2 - Segment Building")
+    log.info("="*80)
+    log.info(f"Run name: {run_name}")
+    log.info(f"Output directory: {run_dir}")
+    log.info(f"Log file: {log_file}")
+    log.info(f"Segment length: {args.segment_days} days, Stride: {args.stride_days} days")
+    log.info(f"Normalization scope: {args.norm_scope}")
+    log.info(f"Country filter: {args.country}")
+    log.info("="*80)
     
     # Initialize components
-    print("\n1. Initializing data loaders...")
+    log.info("\n1. Initializing data loaders...")
     loaders = DataLoaders(
         data_root=Path(args.data_root),
         meteo_root=Path(args.meteo_root)
@@ -202,21 +280,21 @@ def main():
     )
     
     # Load metadata
-    print("\n2. Loading metadata...")
+    log.info("\n2. Loading metadata...")
     metadata = loaders.load_metadata()
-    print(f"   Total sensors: {len(metadata)}")
+    log.info(f"   Total sensors: {len(metadata)}")
     
     # Find sites with complete data (filtered by country)
-    print(f"\n3. Finding sites with complete sensor coverage (country={args.country})...")
+    log.info(f"\n3. Finding sites with complete sensor coverage (country={args.country})...")
     complete_sites = loaders.get_sites_with_complete_data(metadata, country=country_filter)
-    print(f"   Sites with all 3 sensor types: {len(complete_sites)}")
-    print(f"   Site IDs: {sorted(complete_sites)}")
+    log.info(f"   Sites with all 3 sensor types: {len(complete_sites)}")
+    log.info(f"   Site IDs: {sorted(complete_sites)}")
     
     # Record available sites
     report_collector.set_available_sites(list(complete_sites))
     
     # Split into train/test
-    print(f"\n4. Splitting sites (test ratio: {args.test_ratio})...")
+    log.info(f"\n4. Splitting sites (test ratio: {args.test_ratio})...")
     np.random.seed(args.random_seed)
     site_list = sorted(list(complete_sites))
     
@@ -224,29 +302,30 @@ def main():
     if args.force_sites:
         forced_ids = [int(s.strip()) for s in args.force_sites.split(',')]
         site_list = [s for s in site_list if s in forced_ids]
-        print(f"   Forcing specific sites: {site_list}")
+        log.info(f"   Forcing specific sites: {site_list}")
     # Otherwise limit number of sites if requested
     elif args.max_sites > 0 and len(site_list) > args.max_sites:
         site_list = [site_list[i] for i in np.random.choice(
             len(site_list), size=args.max_sites, replace=False)]
-        print(f"   Randomly selected {args.max_sites} sites for processing")
+        log.info(f"   Randomly selected {args.max_sites} sites for processing")
     
     n_test = max(1, int(len(site_list) * args.test_ratio))
     test_sites = set([site_list[i] for i in np.random.choice(
         len(site_list), size=n_test, replace=False)])
     train_sites = set(site_list) - test_sites
     
-    print(f"   Train sites ({len(train_sites)}): {sorted(train_sites)}")
-    print(f"   Test sites ({len(test_sites)}): {sorted(test_sites)}")
+    log.info(f"   Train sites ({len(train_sites)}): {sorted(train_sites)}")
+    log.info(f"   Test sites ({len(test_sites)}): {sorted(test_sites)}")
     
     # Record train/test split in report
     report_collector.set_train_test_split(list(train_sites), list(test_sites))
     
     # Process each split
+    total_filtered_years = 0
     for split_name, sites in [('train', train_sites), ('test', test_sites)]:
-        print(f"\n{'='*80}")
-        print(f"Processing {split_name.upper()} split")
-        print(f"{'='*80}")
+        log.info(f"\n{'='*80}")
+        log.info(f"Processing {split_name.upper()} split")
+        log.info(f"{'='*80}")
         
         # Set current split in report collector
         report_collector.set_current_split(split_name)
@@ -255,12 +334,13 @@ def main():
         all_output_segments = {}
         all_metadata = []
         all_combo_ids = {}
+        split_filtered_years = 0
         
         combo_counter = 0
         
         # Process each site
         for site_id in sorted(sites):
-            print(f"\n  Site {site_id}:")
+            log.info(f"\n  Site {site_id}:")
             
             # Load all sensors for this site
             site_sensors = loaders.load_all_sensors_for_site(site_id, metadata)
@@ -271,9 +351,9 @@ def main():
             dendro_l2_ids = list(site_sensors['dendrometer_l2'].keys())
             dendro_lm_ids = list(site_sensors['dendrometer_lm'].keys())
             
-            print(f"    Thermometers: {len(thermo_ids)}")
-            print(f"    Hygrometers: {len(hygro_ids)}")
-            print(f"    Dendrometers: {len(dendro_l2_ids)}")
+            log.info(f"    Thermometers: {len(thermo_ids)}")
+            log.info(f"    Hygrometers: {len(hygro_ids)}")
+            log.info(f"    Dendrometers: {len(dendro_l2_ids)}")
             
             # Load meteo data
             meteo_df = loaders.load_meteotest_data(site_id)
@@ -289,7 +369,7 @@ def main():
             )
             
             if not has_meteo:
-                print(f"    WARNING: No meteo data for site {site_id}, skipping")
+                log.warning(f"    No meteo data for site {site_id}, skipping")
                 report_collector.finalize_site(site_id)
                 continue
             
@@ -303,14 +383,14 @@ def main():
                 forced_t, forced_h, forced_d = [int(x.strip()) for x in args.force_combination.split(',')]
                 if (forced_t in thermo_ids) and (forced_h in hygro_ids) and (forced_d in dendro_l2_ids):
                     all_combinations = [(forced_t, forced_h, forced_d)]
-                    print(f"    Forcing combination: T={forced_t}, H={forced_h}, D={forced_d}")
+                    log.info(f"    Forcing combination: T={forced_t}, H={forced_h}, D={forced_d}")
                 else:
-                    print(f"    WARNING: Forced combination T={forced_t}, H={forced_h}, D={forced_d} not available, using all")
+                    log.warning(f"    Forced combination T={forced_t}, H={forced_h}, D={forced_d} not available, using all")
             # Sample combinations if max_combinations is set
             elif args.max_combinations > 0 and len(all_combinations) > args.max_combinations:
                 all_combinations = [all_combinations[i] for i in np.random.choice(
                     len(all_combinations), size=args.max_combinations, replace=False)]
-                print(f"    Randomly selected {args.max_combinations} of {len(list(product(thermo_ids, hygro_ids, dendro_l2_ids)))} possible combinations")
+                log.info(f"    Randomly selected {args.max_combinations} of {len(list(product(thermo_ids, hygro_ids, dendro_l2_ids)))} possible combinations")
             
             for thermo_id, hygro_id, dendro_id in all_combinations:
                 # Check if LM data exists for this dendrometer
@@ -318,7 +398,7 @@ def main():
                     continue
                 
                 combo_counter += 1
-                print(f"    Combo {combo_counter}: T={thermo_id}, H={hygro_id}, D={dendro_id}")
+                log.info(f"    Combo {combo_counter}: T={thermo_id}, H={hygro_id}, D={dendro_id}")
                 
                 # Load and process sensor data
                 temp_df = processor.process_sensor_dataframe(
@@ -370,20 +450,20 @@ def main():
                     output_size = os.path.getsize(output_ts_path) if output_exists else 0
                     
                     if not input_exists or not output_exists or input_size == 0 or output_size == 0:
-                        print(f"      WARNING: File verification failed!")
-                        print(f"        Input: exists={input_exists}, size={input_size}")
-                        print(f"        Output: exists={output_exists}, size={output_size}")
+                        log.warning(f"      File verification failed!")
+                        log.warning(f"        Input: exists={input_exists}, size={input_size}")
+                        log.warning(f"        Output: exists={output_exists}, size={output_size}")
                     elif args.verbose:
-                        print(f"        Saved: {os.path.basename(input_ts_path)} ({input_size:,} bytes)")
+                        log.debug(f"        Saved: {os.path.basename(input_ts_path)} ({input_size:,} bytes)")
                         
                 except Exception as e:
-                    print(f"      ERROR saving intermediate files: {e}")
-                    print(f"        Input path: {input_ts_path}")
-                    print(f"        Input shape: {input_df.shape if input_df is not None else 'None'}")
-                    print(f"        Output shape: {output_df.shape if output_df is not None else 'None'}")
+                    log.error(f"      ERROR saving intermediate files: {e}")
+                    log.error(f"        Input path: {input_ts_path}")
+                    log.error(f"        Input shape: {input_df.shape if input_df is not None else 'None'}")
+                    log.error(f"        Output shape: {output_df.shape if output_df is not None else 'None'}")
                 
-                # Build segments from all available data (no year filtering)
-                input_segs, output_segs, seg_metadata = segment_builder.build_segments_for_combination(
+                # Build segments from all available data (with data quality filtering)
+                input_segs, output_segs, seg_metadata, filtered_years_info = segment_builder.build_segments_for_combination(
                     combo_id=combo_counter,
                     site_id=site_id,
                     thermometer_id=thermo_id,
@@ -396,7 +476,31 @@ def main():
                     target_channels=['local_T', 'local_RH', 'stem']
                 )
                 
-                print(f"      Segments found: {len(input_segs)}")
+                log.info(f"      Segments found: {len(input_segs)}")
+                
+                # Log and plot filtered years
+                if filtered_years_info:
+                    log.info(f"      Filtered years: {len(filtered_years_info)}")
+                    combo_str = f"site{site_id}_T{thermo_id}_H{hygro_id}_D{dendro_id}"
+                    for fyi in filtered_years_info:
+                        log.warning(
+                            f"      FILTERED: {combo_str} year {fyi.year} - "
+                            f"ratio={fyi.ratio:.3f}, input_range={fyi.input_range:.1f}, "
+                            f"output_range={fyi.output_range:.1f} - {fyi.reason}"
+                        )
+                        # Plot filtered year
+                        plot_filtered_year(
+                            input_df=input_df,
+                            output_df=output_df,
+                            filtered_info=fyi,
+                            site_id=site_id,
+                            thermo_id=thermo_id,
+                            hygro_id=hygro_id,
+                            dendro_id=dendro_id,
+                            output_dir=filtered_plots_dir,
+                            log=log
+                        )
+                    split_filtered_years += len(filtered_years_info)
                 
                 # Record combination in report (including gap analysis)
                 report_collector.record_combination(
@@ -427,9 +531,13 @@ def main():
             report_collector.finalize_site(site_id)
         
         # Save segments
-        print(f"\n  Saving {split_name} segments...")
-        print(f"    Total combinations: {len(all_input_segments)}")
-        print(f"    Total segments: {len(all_metadata)}")
+        log.info(f"\n  Saving {split_name} segments...")
+        log.info(f"    Total combinations: {len(all_input_segments)}")
+        log.info(f"    Total segments: {len(all_metadata)}")
+        if split_filtered_years > 0:
+            log.info(f"    Filtered years: {split_filtered_years}")
+        
+        total_filtered_years += split_filtered_years
         
         segment_builder.save_segments(
             output_dir=output_dir,
@@ -441,17 +549,21 @@ def main():
         )
     
     # Generate and save build report
-    print("\n" + "-"*80)
-    print("Generating build report...")
+    log.info("\n" + "-"*80)
+    log.info("Generating build report...")
     report = report_collector.generate_report()
     report_dir = output_dir / "reports"
     save_report(report, report_dir)
     
-    print("\n" + "="*80)
-    print("Segment building complete!")
-    print(f"Output saved to: {output_dir}")
-    print(f"Build report saved to: {report_dir}")
-    print("="*80)
+    log.info("\n" + "="*80)
+    log.info("Segment building complete!")
+    if total_filtered_years > 0:
+        log.info(f"Total filtered years: {total_filtered_years}")
+        log.info(f"Filtered year plots saved to: {filtered_plots_dir}")
+    log.info(f"Output saved to: {output_dir}")
+    log.info(f"Build report saved to: {report_dir}")
+    log.info(f"Log file: {log_file}")
+    log.info("="*80)
 
 
 if __name__ == '__main__':

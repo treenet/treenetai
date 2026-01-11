@@ -76,21 +76,25 @@ def main():
     """Main function."""
     args = parse_args()
     
-    print("="*80)
-    print("TreeNet AI Pipeline v2 - Model Evaluation")
-    print("="*80)
-    
     # Create output directory
     output_dir = ensure_dir(Path(args.output_dir))
-    setup_logging(verbose=args.verbose, log_file=output_dir / 'evaluation.log')
+    
+    # Setup logging - single log file for all output
+    log_file = output_dir / 'evaluation.log'
+    log = setup_logging(log_file=log_file, name='evaluate', verbose=args.verbose)
+    
+    log.info("="*80)
+    log.info("TreeNet AI Pipeline v2 - Model Evaluation")
+    log.info("="*80)
+    log.info(f"Log file: {log_file}")
     
     # Load model
-    print(f"\nLoading model from: {args.model_path}")
+    log.info(f"\nLoading model from: {args.model_path}")
     model = TCNModel.load(args.model_path)
-    print("Model loaded successfully")
+    log.info("Model loaded successfully")
     
     # Load test data
-    print(f"\nLoading test data from: {args.data_dir}")
+    log.info(f"\nLoading test data from: {args.data_dir}")
     data_dir = Path(args.data_dir)
     
     with open(data_dir / 'test_input_segments_numpy.pkl', 'rb') as f:
@@ -99,17 +103,17 @@ def main():
     with open(data_dir / 'test_output_segments_numpy.pkl', 'rb') as f:
         y_test = pickle.load(f)
     
-    print(f"Test data: X={X_test.shape}, y={y_test.shape}")
+    log.info(f"Test data: X={X_test.shape}, y={y_test.shape}")
     
     # Limit samples if requested
     if args.n_samples > 0 and args.n_samples < len(X_test):
         indices = np.random.choice(len(X_test), size=args.n_samples, replace=False)
         X_test = X_test[indices]
         y_test = y_test[indices]
-        print(f"Evaluating on {args.n_samples} random samples")
+        log.info(f"Evaluating on {args.n_samples} random samples")
     
     # Create gap injector for evaluation
-    print(f"\nInjecting {args.gap_days}-day gaps for evaluation...")
+    log.info(f"\nInjecting {args.gap_days}-day gaps for evaluation...")
     gap_injector = GapInjector(
         min_gap_days=args.gap_days,
         max_gap_days=args.gap_days,
@@ -121,16 +125,16 @@ def main():
     X_gapped, masks = gap_injector.inject_gaps_batch(X_test)
     
     # Generate predictions
-    print("\nGenerating predictions...")
+    log.info("\nGenerating predictions...")
     predictions = model.predict([X_gapped, masks], verbose=1 if args.verbose else 0)
     
     recon_pred = predictions[0]  # Reconstruction
     hourly_pred = predictions[1]  # Hourly prediction
     
     # Compute metrics
-    print("\n" + "="*80)
-    print("EVALUATION RESULTS")
-    print("="*80)
+    log.info("\n" + "="*80)
+    log.info("EVALUATION RESULTS")
+    log.info("="*80)
     
     # Input channel names
     input_channels = [
@@ -141,8 +145,8 @@ def main():
     target_channels = ['local_T', 'local_RH', 'stem']
     
     # Metrics for reconstruction (gapped regions only)
-    print("\n1. Reconstruction Metrics (gapped regions):")
-    print("-" * 80)
+    log.info("\n1. Reconstruction Metrics (gapped regions):")
+    log.info("-" * 80)
     
     recon_metrics = {}
     for i, ch_name in enumerate(input_channels):
@@ -159,11 +163,11 @@ def main():
         
         recon_metrics[ch_name] = {'mae': mae, 'rmse': rmse, 'r2': r2}
         
-        print(f"  {ch_name:15s}: MAE={mae:.6f}, RMSE={rmse:.6f}, R²={r2:.4f}")
+        log.info(f"  {ch_name:15s}: MAE={mae:.6f}, RMSE={rmse:.6f}, R²={r2:.4f}")
     
     # Metrics for hourly prediction
-    print("\n2. Hourly Prediction Metrics:")
-    print("-" * 80)
+    log.info("\n2. Hourly Prediction Metrics:")
+    log.info("-" * 80)
     
     hourly_metrics = {}
     for i, ch_name in enumerate(target_channels):
@@ -181,7 +185,7 @@ def main():
         
         hourly_metrics[ch_name] = {'mae': mae, 'rmse': rmse, 'r2': r2}
         
-        print(f"  {ch_name:15s}: MAE={mae:.6f}, RMSE={rmse:.6f}, R²={r2:.4f}")
+        log.info(f"  {ch_name:15s}: MAE={mae:.6f}, RMSE={rmse:.6f}, R²={r2:.4f}")
     
     # Save results
     results = {
@@ -208,10 +212,10 @@ def main():
         
         json.dump(convert_types(results), f, indent=2)
     
-    print(f"\n{'='*80}")
-    print(f"Evaluation complete!")
-    print(f"Results saved to: {results_file}")
-    print(f"{'='*80}")
+    log.info(f"\n{'='*80}")
+    log.info(f"Evaluation complete!")
+    log.info(f"Results saved to: {results_file}")
+    log.info(f"{'='*80}")
 
 
 if __name__ == '__main__':
