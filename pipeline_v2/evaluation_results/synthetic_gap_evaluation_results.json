@@ -1,0 +1,56 @@
+{
+  "mode": "synthetic-gaps",
+  "model_path": "/storage/lukovic/Data/FORWARDS/treenet/processed/swiss_segment_norm_all_combos/experiments/20260111_152352_segment_norm_attention/best_model.keras",
+  "timestamp": "2026-01-11T19:10:32.770012",
+  "gap_lengths": {
+    "7": {
+      "gap_days": 7,
+      "n_samples": 50,
+      "n_gaps_per_sample": 2,
+      "channels": {
+        "local_T": {
+          "gap": {
+            "n_points": 6097,
+            "MSE": 0.0069656347425700186,
+            "MAE": 0.06465860554683737,
+            "Correlation": 0.90711348584002
+          },
+          "non_gap": {
+            "n_points": 29903,
+            "MSE": 0.002464674696429924,
+            "MAE": 0.03698753291757772,
+            "Correlation": 0.9763254510850898
+          }
+        },
+        "local_RH": {
+          "gap": {
+            "n_points": 5159,
+            "MSE": 0.020063557683404214,
+            "MAE": 0.10564905148680422,
+            "Correlation": 0.8480801421581843
+          },
+          "non_gap": {
+            "n_points": 30841,
+            "MSE": 0.005682190744440864,
+            "MAE": 0.0589670861862573,
+            "Correlation": 0.9600350815894618
+          }
+        },
+        "stem": {
+          "gap": {
+            "n_points": 5007,
+            "MSE": 0.012223125872938573,
+            "MAE": 0.08527046613251214,
+            "Correlation": 0.9274957753247892
+          },
+          "non_gap": {
+            "n_points": 30993,
+            "MSE": 0.000669250667533523,
+            "MAE": 0.019405449848067486,
+            "Correlation": 0.9959055212422414
+          }
+        }
+      }
+    }
+  }
+}

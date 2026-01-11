@@ -47,6 +47,28 @@ This means the model must learn to:
 4. **Gap filling** → Model fills missing data using surrounding valid data
 5. **Output** → Clean 1-hour resolution time series (TWD, GRO, MDS)
 
+### Train/Test (Holdout) Set Design
+
+**Site-based split**: The raw data is collected from various TreeNet monitoring sites across Switzerland. These sites are split into two disjoint sets:
+
+| Set | Purpose | Description |
+|-----|---------|-------------|
+| **Training Set** | Model learning | Sites used to train the model. The model learns patterns from these sites' data. |
+| **Test (Holdout) Set** | Generalization evaluation | Sites **never seen during training**. Used to evaluate how well the model generalizes to completely new sites. |
+
+**Why this matters:**
+- The model must reconstruct sensor data for **any** TreeNet site, not just the ones it trained on
+- A site-based holdout ensures we test **true generalization** - can the model handle a new tree/sensor/location?
+- If we only split by time (e.g., train on 2019-2022, test on 2023), we might overfit to site-specific patterns
+- Holdout sites test whether the model learned **general** tree physiological patterns vs. **site-specific** quirks
+
+**Current test sites** (as of 2026-01-12):
+- Site 22 (Dendrometers: 120, 121)
+- Site 72 (Dendrometers: 849, 850)
+- Site 86 (Dendrometers: 911, 922, 925, 937)
+
+None of these 8 site/dendrometer combinations appear in training data.
+
 ---
 
 ## 1. Data Directory Structure
@@ -506,6 +528,31 @@ All hyperparameters are centralized in `src/config.py`.
 | `SegmentConfig` | `segment_days=30`, `stride_days=10` | Segment extraction settings |
 | `SplitConfig` | `test_ratio=0.2`, `random_seed=42` | Train/test split |
 
+### Gap Injection Details (IMPORTANT)
+
+**How gaps are distributed across channels:**
+
+When `n_gaps=2` (e.g., "2 channels with gaps"), this means **2 gaps are injected per segment**, but each gap goes to a **different randomly selected channel**:
+
+| Setting | Meaning | Example Distribution |
+|---------|---------|----------------------|
+| `n_gaps=1` | 1 gap in 1 channel | T=7d, RH=0d, Stem=0d |
+| `n_gaps=2` | 2 gaps in 2 different channels | T=7d, RH=7d, Stem=0d |
+| `n_gaps=3` | 3 gaps in all 3 channels | T=7d, RH=7d, Stem=7d |
+
+**Critical:** Gaps are NOT stacked in the same channel. With `n_gaps=2` and `gap_days=12`:
+- ❌ NOT: 24 days missing from one channel
+- ✅ CORRECT: 12 days missing from channel A, 12 days missing from channel B
+
+**Example (12-day gaps, 2 gaps per segment):**
+```
+Sample 0: T=12d gap, RH=0d,    Stem=12d gap  → 40% missing per gapped channel
+Sample 1: T=12d gap, RH=12d gap, Stem=0d    → 40% missing per gapped channel
+Sample 2: T=0d,    RH=12d gap, Stem=12d gap → 40% missing per gapped channel
+```
+
+**Gappable channels:** Only local sensor channels (0, 1, 2) can have gaps. Global meteo channels (3-10) are NEVER gapped.
+
 ### Hyperparameter Tuning Notes
 - **batch_size=16**: Required on single GPU due to memory constraints (24GB RTX 3090)
 - **batch_size=32**: Works with 2+ GPUs or mixed precision
@@ -759,12 +806,64 @@ Location: `{output_dir}/experiments/{timestamp}_{name}/`
 |--------|---------|---------------|
 | `1_build_segments.py` | Extract 30-day segments | `--country`, `--run-name`, `--norm-scope` |
 | `2_train_model.py` | Train TCN model | `--epochs`, `--batch-size`, `--data-dir` |
-| `3_evaluate.py` | Evaluate performance | `--experiment-dir` |
+| `3_evaluate.py` | **Unified evaluation script** | `--mode`, `--model-path`, `--recon-path` |
 | `4_visualize_segments.py` | Visualize segments | `--split`, `--n-samples` |
 | `5_compare_with_raw.py` | Compare with raw data | |
 | `6_reconstruct_timeseries.py` | **Gap-filling main script** | `--site-id`, `--model-path` |
 | `7_visualize_reconstruction.py` | Before/after plots | `--site-id` |
 | `8_visualize_predictions.py` | Model predictions vs truth | `--experiment-dir`, `--n-samples` |
+| `10_plot_gap_evaluation.py` | Gap-filling box plots | `--gap-days`, `--model-path` |
+| `11_visualize_gap_injection.py` | Visualize gap injection | `--gap-days`, `--n-gaps` |
+
+### 3_evaluate.py - Unified Evaluation Script (Details)
+
+This script provides **three evaluation modes** via the `--mode` flag:
+
+| Mode | Description | Required Arguments |
+|------|-------------|-------------------|
+| `segments` | Evaluate on 30-day test segments | `--model-path`, `--data-dir` |
+| `reconstruction` | Compare full reconstruction vs LM data | `--recon-path`, `--lm-path` or `--lm-dir` |
+| `synthetic-gaps` | Inject synthetic gaps and evaluate filling | `--model-path`, `--gap-days` |
+
+**Example Usage:**
+
+```bash
+# Mode 1: Evaluate on test segments (30-day windows)
+python 3_evaluate.py --mode segments \
+    --model-path experiments/best_model.keras \
+    --data-dir /path/to/model_data
+
+# Mode 2: Evaluate full reconstructed time series vs LM data
+python 3_evaluate.py --mode reconstruction \
+    --recon-path reconstructions/site22.ftr \
+    --lm-path site22_lm.ftr
+
+# Mode 3: Synthetic gap injection evaluation
+python 3_evaluate.py --mode synthetic-gaps \
+    --model-path experiments/best_model.keras \
+    --gap-days 1 7 12
+```
+
+**Outputs:**
+- `segments`: `general_evaluation_results.json`
+- `reconstruction`: `reconstruction_evaluation_results.json`
+- `synthetic-gaps`: `synthetic_gap_evaluation_results.json`
+
+### 10_plot_gap_evaluation.py - Gap Evaluation Plots
+
+Generates **box-and-whisker plots** showing gap-filling performance across channels.
+
+**Key Arguments:**
+- `--gap-days`: List of gap lengths to evaluate (e.g., `1 7 12`)
+- `--n-gaps`: Number of channels with gaps per segment (default: 2)
+- `--model-path`: Path to trained model
+
+**Output Files:** (saved to `--output-dir`)
+- `gap_evaluation_error_30d_segments_{gaps}d.png` - Absolute error distribution
+- `gap_evaluation_mse_30d_segments_{gaps}d.png` - MSE distribution
+- `gap_evaluation_correlation_30d_segments_{gaps}d.png` - Correlation distribution
+
+**Title Format:** "(N × 30-day test segments, 2 channels with gaps)"
 
 ### Quick Commands
 
@@ -993,18 +1092,31 @@ When starting a new session, verify:
 
 ## 21. Development Priorities
 
-### Current Focus: Stem MSE < 0.025
+### ✅ COMPLETED: Stem MSE < 0.025 (2026-01-11)
 
-**Approaches being tested:**
-1. ✅ Attention mechanism (8 heads, 64 key_dim) - improved to 0.0305
-2. ✅ Larger model (128 filters, 5 blocks) - improved to 0.0305
-3. 🔄 **Aligned stem normalization** - IN PROGRESS
-4. ⏳ Segment-level gap-aware normalization
+**Final Result:** MSE = 0.00078, R² = 0.9886 (far exceeds target!)
+
+**Successful Configuration:**
+- Segment-level normalization
+- Attention mechanism (8 heads, 64 key_dim)
+- 128 filters, 5 TCN blocks
+- Dataset: 25,517 segments (swiss_segment_norm_all_combos)
+
+**Full Results:**
+| Channel | MAE | R² | MSE |
+|---------|-----|----|----|
+| local_T | 0.043 | 0.9342 | - |
+| local_RH | 0.063 | 0.8985 | - |
+| stem | 0.022 | 0.9886 | 0.00078 |
+
+### Current Focus: PATH 1 Denormalization
+
+**Issue:** Model outputs in relative [0,1] scale. Stem values cannot be directly converted to absolute units without LM reference.
 
 **Next Steps:**
-1. Rebuild segments with aligned stem normalization
-2. Train model with corrected normalization
-3. Evaluate improvement in stem MSE
+1. Test reconstruction on additional sites
+2. Evaluate whether relative output is acceptable for downstream analysis
+3. Consider PATH 2 approach for absolute stem values
 
 ### Visualization Scripts
 
@@ -1016,11 +1128,412 @@ When starting a new session, verify:
 
 ---
 
-## 22. TODO / Future Tasks
+## 22. Signal Reconstruction Strategy (Added 2026-01-11)
+
+### Problem Statement
+
+The ultimate goal is to reconstruct raw sensor signals to produce:
+1. **Clean, gap-free L1/L2 data** (10-min temperature, humidity, dendrometer)
+2. **Clean LM-quality hourly data** for all channels
+
+### Path Analysis
+
+Two main approaches have been identified:
+
+#### PATH 1: Direct L2→LM Reconstruction (Current Implementation)
+
+**Description:**
+Use the existing trained model to directly convert raw L2/L1 input to LM-quality output.
+
+```
+Input:  L1/L2 10-min multi-channel (11 channels) with gaps ≤12 days
+Model:  TCN + Attention (current)
+Output: LM 1-hour 3-channel (temp, humidity, stem) cleaned
+```
+
+**Pros:**
+- ✅ Model already trained and performing well (val_loss ~0.006)
+- ✅ Single inference step
+- ✅ Direct path to clean hourly data
+
+**Cons:**
+- ❌ Cannot handle gaps >12 days without iteration
+- ❌ Input resolution lost (10-min → 1-hour)
+- ❌ If input quality is poor, output may also be poor
+
+**Improvement Ideas:**
+1. Train with larger gaps (up to 15-20 days)
+2. Train with clean data (no gaps) to also learn signal cleaning
+3. Iterative gap-filling for very large gaps
+
+---
+
+#### PATH 2: Staged Gap-Filling + Cleaning (Proposed)
+
+**Description:**
+Split the problem into separate stages with specialized models.
+
+**Stage A: L1/L2 Gap Filling (10-min → 10-min)**
+```
+Input:  L1/L2 10-min multi-channel (11 channels) with gaps
+Model:  TCN_GapFill_L2
+Output: L1/L2 10-min multi-channel (3 channels: temp, humidity, stem) without gaps
+```
+- Train on L2 segments where gaps are artificially injected
+- Target = original L2 values before gap injection
+- Does NOT clean signal, just fills gaps
+
+**Stage B: LM Gap Filling (1-hour → 1-hour)**
+```
+Input:  LM 1-hour 3-channel with gaps
+Model:  TCN_GapFill_LM
+Output: LM 1-hour 3-channel without gaps
+```
+- Similar to Stage A but for LM data
+- Useful for recovering LM ground truth where gaps exist
+
+**Stage C: L2→LM Cleaning (Yearly)**
+```
+Input:  Complete L2 10-min data (from Stage A) for full year
+Model:  TCN_Clean_Yearly
+Output: Clean LM 1-hour data for full year
+```
+- Works on longer segments (yearly)
+- Focuses on signal cleaning, not gap-filling
+- Input has no gaps (filled in Stage A)
+
+**Pros:**
+- ✅ Each model specialized for one task
+- ✅ Can handle unlimited gap sizes (by filling first)
+- ✅ Preserves 10-min resolution where needed
+- ✅ Modular: can improve individual stages
+
+**Cons:**
+- ❌ More complex pipeline (3 models)
+- ❌ More training data needed for each model
+- ❌ Error propagation between stages
+- ❌ 2024-2025: No LM ground truth for temp/humidity (Stage C difficult)
+
+---
+
+### Recommended Strategy: Hybrid Approach
+
+**Phase 1: Start with PATH 1 (Current)**
+1. Use trained model for L2→LM reconstruction on gaps ≤12 days
+2. Evaluate reconstruction quality
+3. If quality is good, iterate for larger gaps
+
+**Phase 2: Develop PATH 2 Stage A (L2 Gap-Filling)**
+1. Create L2→L2 gap-filling model (same resolution)
+2. Train on artificially gapped L2 data
+3. Use to fill gaps before L2→LM conversion
+
+**Phase 3: Combine**
+1. Stage A: Fill L2 gaps (any size)
+2. PATH 1: Convert gap-free L2 to LM-quality output
+3. Result: Complete, clean LM-quality time series
+
+### Implementation Priority
+
+| Priority | Task | Model | Status |
+|----------|------|-------|--------|
+| 1 | PATH 1 reconstruction | Current | ✅ Tested (2026-01-11) |
+| 2 | Stage A: L2→L2 gap-fill | New | ⏳ Pending |
+| 3 | Stage B: LM→LM gap-fill | New | ⏳ Future |
+| 4 | Stage C: Yearly cleaning | New | ⏳ Research |
+
+### PATH 1 Denormalization Challenge (2026-01-11)
+
+**Problem Identified:**
+During training with segment-level normalization, BOTH input and output are normalized to [0,1] using each segment's OWN min/max values. This means:
+
+1. **Input normalization**: Uses L2 min/max (e.g., stem: -85,519 to 18,390)
+2. **Output normalization**: Uses LM min/max (e.g., stem: -13 to 29,552)
+
+These are **independent** normalizations. The model learns to map from normalized input space to normalized output space, but we lose the absolute scale information.
+
+**Consequences:**
+- When reconstructing without LM data (the whole point of PATH 1), we cannot perfectly denormalize the output
+- For Temperature and RH, the L2 and LM scales are similar, so using input params works OK
+- For Stem, L2 and LM have very different scales (ratio ~0.38), causing large absolute errors
+
+**Validation Results (Site 3, Segment-Norm+Attention Model):**
+
+| Channel | MAE (absolute) | Correlation | Normalized MAE |
+|---------|---------------|-------------|----------------|
+| local_T | 0.67°C | **0.993** | 0.018 |
+| local_RH | 3.2% | **0.966** | 0.042 |
+| stem | 11,649 µm | 0.475 | 1.56 |
+
+**Key Observations:**
+1. Temperature and RH work excellently (>96% correlation)
+2. Stem has moderate temporal correlation but wrong absolute scale
+3. The model captures patterns correctly, but denormalization is the issue
+
+**Output Modes in `6_reconstruct_timeseries_v2.py`:**
+- `--output-mode normalized`: Keep output in [0,1] range (relative values)
+- `--output-mode input_scale`: Use input normalization params (approximation)
+
+### Stem Evaluation: Alignment Procedure (2026-01-11)
+
+**IMPORTANT**: For stem (dendrometer) data, the absolute scale is **arbitrary**. The baseline shifts over time due to sensor resets, calibration, and environmental factors. Therefore:
+
+**Correct Evaluation Procedure for Stem:**
+1. Reconstruct the time series normally
+2. **Align/shift** the reconstructed stem to minimize MAE with ground truth
+3. The optimal shift is: `shift = median(LM_stem - recon_stem)`
+4. Compute correlation and MAE **after alignment**
+
+**Why This Matters:**
+- A correlation of 0.999 with MAE of 4000 µm doesn't mean poor reconstruction
+- After optimal shift, MAE of 30 µm (0.5% of range) is achievable
+- The **pattern** is what matters, not the absolute baseline
+
+**Test Site Results (Held-out Sites, NOT in Training):**
+
+| Test Site | T Corr | RH Corr | Stem Corr | Stem MAE (aligned) | Stem Normalized MAE |
+|-----------|--------|---------|-----------|-------------------|---------------------|
+| Site 22 (D=120) | 0.983 | 0.927 | **0.999** | 30 µm | **0.54%** ✅ |
+| Site 86 (D=911) | 0.966 | 0.849 | 0.250 | 2014 µm | 156% ⚠️ |
+
+**Key Findings:**
+- Site 22: Excellent reconstruction across all channels
+- Site 86: T and RH good, but stem has issues (likely data quality problem in source data)
+
+**Visualization Files (Test Sites):**
+- `/home/lukovic/data/treenet/visualizations/reconstructions/test_sites/`
+
+---
+
+## 23. Gap Tracking and Per-Channel Visualization
+
+### Per-Channel Gap Tracking (Added 2026-01-11)
+
+The reconstruction script (`6_reconstruct_timeseries_v2.py`) now tracks gaps **per-channel** independently:
+
+**Output Columns:**
+| Column | Description |
+|--------|-------------|
+| `is_gap` | Overall gap (from merged input analysis) |
+| `is_gap_T` | Temperature sensor (L1 thermometer) gaps |
+| `is_gap_RH` | Humidity sensor (L1 hygrometer) gaps |
+| `is_gap_stem` | Stem sensor (L2 dendrometer) gaps |
+
+**How gaps are identified:**
+- For each hourly output timestamp, check if the underlying raw sensor has data within that hour
+- If no sensor samples exist within that hour → marked as gap for that channel
+- Each channel is checked independently against its own sensor source
+
+**Important: These are INPUT gaps (L1/L2), NOT output (LM) gaps!**
+- Grey shading in visualizations indicates where the model is **inferring/gap-filling** values
+- Rather than translating actual measurements
+
+### Sensor Co-Location and Gap Patterns
+
+**Why gaps may appear identical across channels:**
+
+At TreeNet sites, sensors are typically on the **same data logger/station**:
+- Thermometer (temperature)
+- Hygrometer (humidity)
+- Dendrometer (stem)
+
+**When the data logger fails** (power loss, connectivity issues, etc.), **all sensors go down together**.
+
+**Example - Site 86, Year 2019:**
+| Timestamp Range | T Gap | RH Gap | Stem Gap | Cause |
+|-----------------|-------|--------|----------|-------|
+| 2019-07-16 13:00-14:00 | ✓ | ✓ | ✓ | System outage |
+| 2019-12-30 23:00 to 2019-12-31 22:00 | ✓ | ✓ | ✓ | System outage |
+
+These identical patterns are **NOT a bug** - they reflect real system-wide outages.
+
+**However**, sensors CAN have different gap patterns when:
+- Individual sensor failures (sensor-specific problems)
+- Sensor maintenance/replacement
+- Different operational start/end dates
+
+**Example - Site 86, Year 2020 (different patterns):**
+| Metric | Temperature | Humidity | Stem |
+|--------|-------------|----------|------|
+| Gap hours | 69 | 67 | **25** |
+| T+RH but not Stem | 42 hours | - | - |
+
+In 2020, there are **42 hours** where T and RH have gaps but Stem does NOT.
+
+### Visualization Script (v3)
+
+**Script:** `7_visualize_reconstruction_v3.py`
+
+**Features:**
+- **450 DPI** (triple resolution for publication quality)
+- **Per-channel gap shading**: Each subplot shows gaps specific to that channel
+- **Colors**: Blue (LM ground truth), Red (reconstruction), Grey (gap regions)
+- **Stem alignment**: Applies optimal vertical shift for visual comparison
+- **Statistics**: Correlation and MAE displayed on each subplot
+
+**Usage:**
+```bash
+python 7_visualize_reconstruction_v3.py \
+    --recon-path <reconstructed_file.ftr> \
+    --site-id <site> \
+    --years 2019 2020 \
+    --output-dir <output_directory>
+```
+
+---
+
+## 23.5. Test Site Data Quality Analysis (Added 2026-01-12)
+
+### Train/Test Split Design
+
+**IMPORTANT**: All test site/dendrometer combinations are **TEST-ONLY** (holdout):
+- None of the 8 test dendrometers appear in the training set
+- This is by design for proper generalization evaluation
+- The model has never seen these specific sensors during training
+
+**Test Combinations:**
+| Site | Dendrometer | Training Status |
+|------|-------------|-----------------|
+| 22 | 120 | TEST ONLY |
+| 22 | 121 | TEST ONLY |
+| 72 | 849 | TEST ONLY |
+| 72 | 850 | TEST ONLY |
+| 86 | 911 | TEST ONLY |
+| 86 | 922 | TEST ONLY |
+| 86 | 925 | TEST ONLY |
+| 86 | 937 | TEST ONLY |
+
+### L2 Data Discontinuities in Test Dendrometers
+
+**Analysis performed**: Checked for month-to-month mean value jumps > 1000 µm
+
+| Site | Dendro | Data Range | Value Range (µm) | Discontinuities |
+|------|--------|------------|------------------|-----------------|
+| 22 | 120 | 2014-03 to 2025-06 | 0 - 13,140 | **2** (Jun-Jul 2017) |
+| 22 | 121 | 2014-03 to 2025-06 | -3,211 - 9,752 | **2** (Jul 2017, Jan 2020) |
+| 72 | 849 | 2014-04 to 2025-06 | 1,760 - 11,110 | **1** (Jan 2022: 9,279 µm jump!) |
+| 72 | 850 | 2014-04 to 2025-06 | 4,109 - 17,358 | **4** (Jun 2015, May 2019, Jan 2020, Jan 2022) |
+| **86** | **911** | 2016-11 to 2022-08 | 1,465 - 9,983 | **3** (Jan 2018, Jul 2018, **Jan 2019: 8,373 µm jump!**) |
+| 86 | 922 | 2017-02 to 2025-06 | 3,503 - 5,966 | **0** ✓ |
+| 86 | 925 | 2010-10 to 2016-09 | 3,448 - 5,003 | **0** ✓ |
+| 86 | 937 | 2016-11 to 2025-06 | 8,374 - 15,119 | **3** (Jan 2022, Jan 2025, May 2025) |
+
+### Root Cause: Site 86 D=911 January 2019 Reconstruction Issue
+
+**Problem observed**: Poor stem reconstruction at beginning of January 2019
+
+**Investigation findings**:
+1. L2 data has a **massive discontinuity in December 2018**:
+   - Before: ~1,500 µm
+   - After: ~9,900 µm
+   - Jump magnitude: **8,373 µm**
+2. LM (ground truth) is stable at ~5,800 µm throughout
+3. This is a **sensor reset/calibration change**, not real tree growth
+4. Segments starting January 1, 2019 see L2 values at ~9,900 µm but LM targets at ~5,800 µm
+5. The model hasn't been trained on this dendrometer (test-only) so cannot learn this offset
+
+**Implication**: The model performs well on sites with continuous L2 data (e.g., Site 22 D=120 for recent years, Site 86 D=922), but struggles with sensor resets that create L2↔LM mismatches.
+
+### Recommendations
+
+1. **Focus evaluation on stable dendrometers**: D=922 and D=925 (Site 86) have no discontinuities
+2. **Document known discontinuities**: Use this analysis to interpret reconstruction quality
+3. **Consider preprocessing**: For production use, implement discontinuity detection and handling
+4. **Acknowledge limitation**: Model trained on L2→LM transformation assumes consistent sensor calibration
+
+---
+
+## 23.6. Gap-Filling Performance Evaluation (Added 2026-01-12)
+
+### Evaluation Methodology
+
+**Synthetic Gap Injection**: Since we have paired input/output data (30-day segments with no gaps), we evaluate gap-filling by:
+1. Taking clean test segments (input and target)
+2. Injecting synthetic gaps into input data (first 3 channels only)
+3. Passing gapped input through the model
+4. Comparing model output to original target
+5. Computing metrics for gap regions only vs. non-gap regions
+
+**Script**: `9_evaluate_synthetic_gaps.py`
+
+**Parameters for main evaluation**:
+- Test segments: 403 (all)
+- Gap length: 7 days
+- Gaps per segment: 2
+- Gap percentage: ~15%
+
+### Results: 7-Day Gaps (All 403 Test Segments)
+
+#### Entire 30-Day Segments
+| Channel | MAE | RMSE | Correlation | R² | N samples |
+|---------|-----|------|-------------|-----|-----------|
+| local_T | 0.047 | 0.062 | **0.959** | 0.919 | 290,160 |
+| local_RH | 0.068 | 0.091 | **0.938** | 0.880 | 290,160 |
+| stem | 0.032 | 0.052 | **0.981** | 0.960 | 290,160 |
+
+#### Gap Regions ONLY (True Gap-Filling Performance)
+| Channel | MAE | RMSE | Correlation | R² | N samples |
+|---------|-----|------|-------------|-----|-----------|
+| local_T | 0.064 | 0.082 | **0.926** | 0.855 | 43,285 |
+| local_RH | 0.091 | 0.118 | **0.895** | 0.800 | 43,793 |
+| stem | 0.091 | 0.117 | **0.898** | 0.806 | 43,198 |
+
+#### Non-Gap Regions (Comparison Baseline)
+| Channel | MAE | RMSE | Correlation | R² | N samples |
+|---------|-----|------|-------------|-----|-----------|
+| local_T | 0.044 | 0.058 | **0.965** | 0.930 | 246,875 |
+| local_RH | 0.064 | 0.085 | **0.946** | 0.894 | 246,367 |
+| stem | 0.022 | 0.028 | **0.995** | 0.988 | 246,962 |
+
+### Key Findings
+
+1. **Gap-filling works well**: Correlation remains >0.89 for all channels even in gap regions
+2. **Temperature is best**: Gap correlation 0.926 (only 4% drop from non-gap)
+3. **Stem has largest gap penalty**: Gap correlation drops from 0.995 to 0.898 (~10% drop)
+4. **All channels meet quality threshold**: Correlation >0.8 for gap regions indicates reliable gap-filling
+
+**Note**: Values are normalized [0,1], so MAE=0.064 means ~6.4% of normalized range error.
+
+### Performance Degradation by Region
+
+| Channel | Non-Gap Corr | Gap Corr | Degradation |
+|---------|--------------|----------|-------------|
+| local_T | 0.965 | 0.926 | -4.0% |
+| local_RH | 0.946 | 0.895 | -5.4% |
+| stem | 0.995 | 0.898 | -9.7% |
+
+Stem channel shows largest degradation in gaps, likely because:
+1. Dendrometer data has more complex temporal dynamics
+2. Model relies more heavily on local context for stem reconstruction
+3. Temperature and humidity correlate better with COSMO reanalysis (auxiliary input)
+
+### Interpretation
+
+The model can fill **7-day gaps** (14% of segment) with approximately:
+- **93% correlation** for temperature
+- **90% correlation** for humidity
+- **90% correlation** for stem radius
+
+This demonstrates the model has learned meaningful patterns from surrounding context and auxiliary meteorological data to reconstruct missing local sensor measurements.
+
+---
+
+## 24. TODO / Future Tasks
 
 ### High Priority
 
-1. **☐ Data Quality Filter: Recover Filtered Years**
+1. **✅ Achieve stem MSE < 0.025** (COMPLETED 2026-01-11)
+   - **Final result**: MSE = 0.00078, R² = 0.9886
+   - Model: segment-norm + attention (128 filters, 5 blocks, 8 heads)
+   - Path: `/storage/lukovic/Data/FORWARDS/treenet/processed/swiss_segment_norm_all_combos/experiments/20260111_152352_segment_norm_attention/best_model.keras`
+
+2. **✅ Implement PATH 1 reconstruction** (COMPLETED 2026-01-11)
+   - Script: `6_reconstruct_timeseries_v2.py`
+   - Tested on Site 3
+   - Results: T correlation 0.993, RH correlation 0.966, stem correlation 0.475
+   - **Limitation**: Stem denormalization requires LM reference (see Section 22)
+
+3. **☐ Data Quality Filter: Recover Filtered Years**
    - **Issue**: Years failing quality check (ratio outside [0.5, 2.0]) are completely excluded
    - **Impact**: ~124 year-segments worth of data not used for training
    - **Proposed approach**:
@@ -1031,27 +1544,34 @@ When starting a new session, verify:
    - **Location of filtered year info**: `{run_dir}/logs/filtered_plots/`
    - **Status**: Logging and visualization implemented (2026-01-11)
 
-2. **☐ Achieve stem MSE < 0.025**
-   - Current best: ~0.0305
-   - Approaches to try: aligned normalization, larger models, attention tuning
-
 ### Medium Priority
 
-3. **☐ Generate ground truth for 2024-2025**
+4. **☐ Resolve stem denormalization for PATH 1**
+   - Options:
+     a. Accept relative output (normalized [0,1])
+     b. Develop scale calibration using partial LM data
+     c. Train PATH 2 model (LM→LM) for absolute values
+   
+5. **☐ Develop Stage A: L2→L2 gap-filling model**
+   - Create new segment builder for L2→L2 training
+   - Train and evaluate model
+   - Integrate into reconstruction pipeline
+
+6. **☐ Generate ground truth for 2024-2025**
    - Use trained model to produce clean temperature/humidity data
    - Validate against available LM stem data for those years
 
-4. **☐ Implement segment-level gap-aware normalization**
-   - Normalize AFTER gap injection using only values outside gap region
-
 ### Low Priority / Research
 
-5. **☐ Investigate outlier detection methods**
+7. **☐ Investigate outlier detection methods**
    - Automated spike detection in L2 data
    - Statistical vs. ML-based approaches
 
-6. **☐ Cross-validation study**
+8. **☐ Cross-validation study**
    - Evaluate model generalization across different sites/years
+
+9. **☐ Yearly segment processing (Stage C)**
+   - Research feasibility given ground truth limitations
 
 ---
 

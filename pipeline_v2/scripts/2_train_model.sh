@@ -23,14 +23,14 @@ set -e  # Exit on error
 # ─────────────────────────────────────────────────────────────────────────────────
 # Run name: determines input/output folder
 # Should match the run_name used in segment building
-RUN_NAME="swiss_full_yearly_norm"
+RUN_NAME="swiss_segment_norm_all_combos"
 
 # Output root directory
 OUTPUT_ROOT="/storage/lukovic/Data/FORWARDS/treenet/processed"
 
 # Optional: custom experiment name (leave empty for timestamp only)
 # Examples: "baseline", "larger_model", "test_1"
-EXPERIMENT_NAME="attention_v2"
+EXPERIMENT_NAME="segment_norm_attention"
 
 # ─────────────────────────────────────────────────────────────────────────────────
 # MODEL ARCHITECTURE HYPERPARAMETERS
@@ -121,7 +121,7 @@ MIN_LR=0.000001
 # ─────────────────────────────────────────────────────────────────────────────────
 # GPU ID to use (0-5 for 6-GPU system)
 # Check availability with: nvidia-smi
-GPU_ID=1
+GPU_ID=2
 
 # ─────────────────────────────────────────────────────────────────────────────────
 # PROCESSING OPTIONS

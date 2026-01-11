@@ -2,22 +2,20 @@
 """
 Visualize reconstructed time series from PATH 1 reconstruction.
 
-Enhanced version with:
-- Triple resolution (450 DPI)
-- Blue ground truth (wider line), Red reconstruction
-- Ground truth plotted first (below)
-- Gap regions highlighted with light grey shading
-- Stem alignment for proper visual comparison
+Creates multi-panel plots showing:
+- Original LM data (ground truth where available)
+- Reconstructed data
+- Comparison for validation periods
 
 Usage:
-    python 7_visualize_reconstruction_v3.py \
-        --recon-path /home/lukovic/data/treenet/reconstructions/test_sites/reconstructed_site22_T119_H118_D120.ftr \
-        --site-id 22 \
-        --thermo-id 119 \
-        --hygro-id 118 \
-        --dendro-id 120 \
-        --years 2021 2022 \
-        --output-dir /home/lukovic/data/treenet/visualizations/reconstructions/test_sites
+    python 7_visualize_reconstruction_v2.py \
+        --recon-path /home/lukovic/data/treenet/reconstructions/reconstructed_site3_T9_H7_D18.ftr \
+        --site-id 3 \
+        --thermo-id 9 \
+        --hygro-id 7 \
+        --dendro-id 18 \
+        --years 2023 2024 \
+        --output-dir /home/lukovic/data/treenet/visualizations/reconstructions
 
 Author: Lukovic
 Date: 2026-01-11
@@ -26,13 +24,12 @@ Date: 2026-01-11
 import argparse
 import sys
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import pyarrow.feather as feather
-from scipy import optimize
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -45,7 +42,7 @@ from src.utils import ensure_dir
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description='Visualize reconstructed time series (enhanced version)'
+        description='Visualize reconstructed time series'
     )
     
     parser.add_argument(
@@ -104,83 +101,23 @@ def load_lm_data(loaders: DataLoaders, processor: DataProcessor, dendro_id: int)
     return lm_df
 
 
-def find_optimal_stem_shift(recon_stem: np.ndarray, lm_stem: np.ndarray) -> float:
-    """
-    Find optimal shift to align reconstructed stem with LM.
-    
-    Returns the shift value that minimizes MAE.
-    """
-    valid = ~(np.isnan(recon_stem) | np.isnan(lm_stem))
-    if valid.sum() == 0:
-        return 0.0
-    
-    recon_valid = recon_stem[valid]
-    lm_valid = lm_stem[valid]
-    
-    # Use median difference as optimal shift (robust to outliers)
-    shift = np.median(lm_valid - recon_valid)
-    
-    return shift
-
-
-def identify_gap_regions_for_channel(df: pd.DataFrame, gap_col: str) -> List[Tuple[pd.Timestamp, pd.Timestamp]]:
-    """
-    Identify gap regions from a per-channel gap column.
-    
-    Args:
-        df: DataFrame with index as timestamp
-        gap_col: Column name (e.g., 'is_gap_T', 'is_gap_RH', 'is_gap_stem')
-    
-    Returns list of (start, end) tuples for contiguous gap regions.
-    """
-    gaps = []
-    
-    if len(df) < 2 or gap_col not in df.columns:
-        return gaps
-    
-    # Sort by index
-    df = df.sort_index()
-    
-    # Find contiguous gap regions
-    is_gap = df[gap_col].values
-    in_gap = False
-    gap_start = None
-    
-    for i, (idx, val) in enumerate(zip(df.index, is_gap)):
-        if val and not in_gap:
-            # Start of a gap
-            gap_start = idx
-            in_gap = True
-        elif not val and in_gap:
-            # End of a gap
-            gaps.append((gap_start, df.index[i-1] if i > 0 else idx))
-            in_gap = False
-    
-    # Handle gap that extends to end
-    if in_gap and gap_start is not None:
-        gaps.append((gap_start, df.index[-1]))
-    
-    return gaps
-
-
 def plot_year(
     recon_df: pd.DataFrame,
     lm_df: Optional[pd.DataFrame],
     year: int,
     site_id: int,
     sensor_ids: dict,
-    stem_shift: float,
     output_dir: Path
 ) -> Path:
     """
-    Create a multi-panel plot for one year with enhanced visuals.
+    Create a multi-panel plot for one year.
     
     Returns path to saved figure.
     """
     # Filter to year
-    recon_year = recon_df[recon_df.index.year == year].copy()
+    recon_year = recon_df[recon_df.index.year == year]
     if lm_df is not None:
-        lm_year = lm_df[lm_df.index.year == year].copy()
+        lm_year = lm_df[lm_df.index.year == year]
     else:
         lm_year = None
     
@@ -188,72 +125,45 @@ def plot_year(
         print(f"  No data for year {year}")
         return None
     
-    # Apply stem shift to reconstruction for visualization
-    if 'stem' in recon_year.columns:
-        recon_year['stem_aligned'] = recon_year['stem'] + stem_shift
-    
-    # Create mapping of channels to their gap columns
-    gap_columns = {
-        'local_T': 'is_gap_T',
-        'local_RH': 'is_gap_RH',
-        'stem': 'is_gap_stem'
-    }
-    
     # Create figure with 3 subplots (T, RH, stem)
-    fig, axes = plt.subplots(3, 1, figsize=(20, 12), sharex=True)
+    fig, axes = plt.subplots(3, 1, figsize=(16, 10), sharex=True)
     
     channels = ['local_T', 'local_RH', 'stem']
-    recon_channels = ['local_T', 'local_RH', 'stem_aligned']
-    titles = ['Temperature (°C)', 'Relative Humidity (%)', 'Stem Radius (µm) - Aligned']
+    titles = ['Temperature (°C)', 'Relative Humidity (%)', 'Stem Radius (µm)']
+    colors = {'recon': '#2196F3', 'lm': '#4CAF50'}
     
-    # Colors and styles
-    color_lm = '#2196F3'  # Blue for ground truth
-    color_recon = '#F44336'  # Red for reconstruction
-    color_gap = '#E0E0E0'  # Light grey for gap regions
-    
-    for ax, channel, recon_channel, title in zip(axes, channels, recon_channels, titles):
-        # Get per-channel gap regions
-        gap_col = gap_columns.get(channel, 'is_gap')
-        gaps = identify_gap_regions_for_channel(recon_year, gap_col)
+    for ax, channel, title in zip(axes, channels, titles):
+        # Plot reconstructed
+        ax.plot(
+            recon_year.index, 
+            recon_year[channel],
+            color=colors['recon'],
+            alpha=0.8,
+            linewidth=0.5,
+            label='Reconstructed'
+        )
         
-        # Add gap shading first (background)
-        for gap_start, gap_end in gaps:
-            ax.axvspan(gap_start, gap_end, color=color_gap, alpha=0.5, zorder=0)
-        
-        # Plot LM ground truth FIRST (so it's below reconstruction)
+        # Plot LM if available
         if lm_year is not None and channel in lm_year.columns:
             ax.plot(
                 lm_year.index,
                 lm_year[channel],
-                color=color_lm,
-                alpha=0.9,
-                linewidth=1.5,  # Wider line for ground truth
-                label='Ground Truth (LM)',
-                zorder=1
+                color=colors['lm'],
+                alpha=0.6,
+                linewidth=0.5,
+                label='LM (Ground Truth)'
             )
         
-        # Plot reconstructed on top
-        if recon_channel in recon_year.columns:
-            ax.plot(
-                recon_year.index,
-                recon_year[recon_channel],
-                color=color_recon,
-                alpha=0.8,
-                linewidth=0.8,
-                label='Reconstructed',
-                zorder=2
-            )
-        
-        ax.set_ylabel(title, fontsize=11)
-        ax.legend(loc='upper right', fontsize=10)
+        ax.set_ylabel(title)
+        ax.legend(loc='upper right')
         ax.grid(True, alpha=0.3)
         
         # Calculate stats for annotation
-        if lm_year is not None and channel in lm_year.columns and recon_channel in recon_year.columns:
+        if lm_year is not None and channel in lm_year.columns:
             # Find common indices
             common_idx = recon_year.index.intersection(lm_year.index)
             if len(common_idx) > 0:
-                recon_vals = recon_year.loc[common_idx, recon_channel]
+                recon_vals = recon_year.loc[common_idx, channel]
                 lm_vals = lm_year.loc[common_idx, channel]
                 valid = ~(recon_vals.isna() | lm_vals.isna())
                 if valid.sum() > 0:
@@ -263,29 +173,28 @@ def plot_year(
                         f'Corr: {corr:.3f}, MAE: {mae:.2f}',
                         xy=(0.02, 0.95),
                         xycoords='axes fraction',
-                        fontsize=10,
-                        bbox=dict(boxstyle='round', facecolor='white', alpha=0.9)
+                        fontsize=9,
+                        bbox=dict(boxstyle='round', facecolor='white', alpha=0.8)
                     )
     
     # Format x-axis
     axes[-1].xaxis.set_major_formatter(mdates.DateFormatter('%b'))
     axes[-1].xaxis.set_major_locator(mdates.MonthLocator())
-    axes[-1].set_xlabel(f'{year}', fontsize=12)
+    axes[-1].set_xlabel(f'{year}')
     
     # Title
     fig.suptitle(
         f'Reconstructed Time Series - Site {site_id} (T={sensor_ids["thermo"]}, '
-        f'H={sensor_ids["hygro"]}, D={sensor_ids["dendro"]}) - {year}\n'
-        f'(Grey shading indicates gap regions)',
-        fontsize=14
+        f'H={sensor_ids["hygro"]}, D={sensor_ids["dendro"]}) - {year}',
+        fontsize=12
     )
     
     plt.tight_layout()
     
-    # Save at triple resolution (450 DPI instead of 150)
-    filename = f'reconstruction_site{site_id}_T{sensor_ids["thermo"]}_H{sensor_ids["hygro"]}_D{sensor_ids["dendro"]}_{year}_v3.png'
+    # Save
+    filename = f'reconstruction_site{site_id}_T{sensor_ids["thermo"]}_H{sensor_ids["hygro"]}_D{sensor_ids["dendro"]}_{year}.png'
     output_path = output_dir / filename
-    fig.savefig(output_path, dpi=450, bbox_inches='tight')
+    fig.savefig(output_path, dpi=150, bbox_inches='tight')
     plt.close(fig)
     
     return output_path
@@ -299,7 +208,7 @@ def main():
     output_dir = ensure_dir(Path(args.output_dir))
     
     print("="*80)
-    print("TreeNet AI - Reconstruction Visualization (Enhanced v3)")
+    print("TreeNet AI - Reconstruction Visualization")
     print("="*80)
     
     # Load reconstructed data
@@ -331,17 +240,6 @@ def main():
     else:
         print("  No LM data available for comparison")
     
-    # Calculate optimal stem shift for alignment
-    stem_shift = 0.0
-    if lm_df is not None and 'stem' in recon_df.columns and 'stem' in lm_df.columns:
-        print("\nCalculating optimal stem alignment shift...")
-        common_idx = recon_df.index.intersection(lm_df.index)
-        if len(common_idx) > 0:
-            recon_stem = recon_df.loc[common_idx, 'stem'].values
-            lm_stem = lm_df.loc[common_idx, 'stem'].values
-            stem_shift = find_optimal_stem_shift(recon_stem, lm_stem)
-            print(f"  Optimal shift: {stem_shift:.2f} µm")
-    
     # Determine years to plot
     available_years = sorted(recon_df.index.year.unique())
     if args.years:
@@ -359,11 +257,11 @@ def main():
     }
     
     # Create plots for each year
-    print("\nGenerating high-resolution plots (450 DPI)...")
+    print("\nGenerating plots...")
     for year in years:
         print(f"  Year {year}...")
         output_path = plot_year(
-            recon_df, lm_df, year, args.site_id, sensor_ids, stem_shift, output_dir
+            recon_df, lm_df, year, args.site_id, sensor_ids, output_dir
         )
         if output_path:
             print(f"    Saved: {output_path}")
