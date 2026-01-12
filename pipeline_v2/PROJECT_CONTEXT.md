@@ -2,7 +2,93 @@
 
 **Purpose**: This file documents project-specific context details to help maintain continuity across sessions. Reference this document at the start of any new session.
 
-**Last Updated**: 2026-01-12
+**Last Updated**: 2026-01-12 (Gap types documentation, constrained RH visualization)
+
+---
+
+## ⚠️ CRITICAL INSTRUCTION FOR AI ASSISTANTS
+
+**ALWAYS UPDATE THIS FILE** with any new information discovered during conversations:
+- New findings, limitations, or insights about the data or model
+- New scripts created or significant modifications to existing scripts
+- New output directories or file naming conventions
+- Solutions to problems encountered
+- Important technical details that would help future sessions
+
+This ensures continuity across sessions and prevents rediscovery of the same issues.
+
+---
+
+## Change Log
+
+### 2026-01-12 - Comprehensive Test Set Evaluation (2020-2021 with Stem Alignment)
+- **Re-evaluated with stem alignment** for proper scale calibration
+- **Years 2020-2021** selected as optimal (260,106 hours vs 175,387 for 2021-2022)
+- **Summary Metrics (WITH Stem Alignment)**:
+  | Channel | Mean Correlation | Mean MAE | Mean R² |
+  |---------|------------------|----------|---------|
+  | Temperature | 0.914 | 2.25°C | 0.83 |
+  | Relative Humidity | 0.791 | 8.42% | 0.57 |
+  | Stem | 0.800 | 25.8 μm | 0.75 |
+- **CRITICAL**: Stem alignment is REQUIRED for multi-year reconstruction evaluation
+  - Without alignment: R² = -2857 (severely negative due to scale mismatch)
+  - With alignment: R² = 0.75 (proper evaluation)
+- **New/Modified scripts**:
+  - `batch_evaluate_test_set.py` - Now accepts `--years` argument and auto-applies stem alignment
+  - `visualize_boxplots.py` - Box-and-whisker plots for metric comparison
+- **Output directories**:
+  - `/home/lukovic/data/treenet/test_set_evaluation_unconstrained_2020_2021_aligned/` - Current results
+  - `/home/lukovic/data/treenet/test_set_evaluation_unconstrained_2021_2022/` - Prior results (no alignment)
+- **Boxplots generated**: `boxplot_correlation_*.png`, `boxplot_mae_*.png`, `boxplot_r2_*.png`, `evaluation_comparison_*.png`
+
+### 2026-01-12 - Batch Test Set Evaluation (Unconstrained Model, NO alignment)
+- **Evaluated unconstrained model on ALL 20 test combinations** for years 2021-2022
+- **4 combinations failed** (site86_*_D925): insufficient data for 30-day windows
+- **16 combinations successfully evaluated** with full metrics and visualizations
+- **Summary Metrics (WITHOUT Stem Alignment - for comparison)**:
+  | Channel | Mean Correlation | Mean MAE | Mean R² |
+  |---------|------------------|----------|---------|
+  | Temperature | 0.855 | 2.94°C | 0.70 |
+  | Relative Humidity | 0.757 | 8.90% | 0.50 |
+  | Stem | 0.743 | 1782 μm | -2857 (scale issue) |
+- **Key observation**: Stem R² is severely negative due to scale mismatch (operational denorm)
+  - Stem needs scale alignment via `--align-stem` flag or LM-based denormalization
+- **New script**: `batch_evaluate_test_set.py` - Comprehensive batch evaluation
+- **Output directory**: `/home/lukovic/data/treenet/test_set_evaluation_unconstrained_2021_2022/`
+  - 16 × stacked visualizations (`stacked_with_gaps_*.png`)
+  - 16 × reconstruction feather files (`reconstructed_*.ftr`)
+  - `evaluation_metrics.json` - Full per-combination metrics
+  - `evaluation_summary.txt` - Aggregated summary
+
+### 2026-01-12 - Constrained RH Model Evaluation & Gap Documentation
+- **Constrained RH model trained**: penalty_weight=0.1, 13 epochs fine-tuning from unconstrained model
+- **Model path**: `/storage/lukovic/Data/FORWARDS/treenet/processed/swiss_segment_norm_all_combos/experiments/20260112_190347_constrained_rh_v2_finetune_constrained_rh/best_model.keras`
+- **RH constraint comparison** (403 test segments, 290,160 predictions):
+  - Below-0 violations: 61 → 37 (**39% reduction**)
+  - Above-1 violations: 0 → 2 (minor increase)
+  - MAE: 0.0625 → 0.0639 (2.3% trade-off)
+- **New scripts created**:
+  - `compare_rh_constraint.py` - Quick RH comparison
+  - `compare_rh_detailed.py` - Comprehensive RH analysis
+  - `compare_reconstruction_stacked.py` - Side-by-side reconstruction comparison
+  - `visualize_stacked_with_gaps_constrained.py` - 9-row stacked visualization with gap shading
+- **Modified scripts**:
+  - `6_reconstruct_timeseries.py`: Added `.ftr` extension support, `constrained_hourly_loss`, string combo-ids
+  - `src/models/tcn.py`: Added `constrained_hourly_loss` to `TCNModel.load()`
+- **Documented gap types**: Missing timestamps vs NaN values (critical for gap detection)
+- **Output files**:
+  - `/home/lukovic/data/treenet/rh_constraint_comparison/` - Comparison visualizations
+  - `/home/lukovic/data/treenet/reconstructions_constrained_site22/` - Constrained reconstructions
+
+### 2026-01-12 - Code Cleanup and Script Unification
+- **Merged training scripts**: `2_train_model.py` now supports `--fine-tune`, `--constrain-rh`, `--use-attention` flags
+- **Merged reconstruction scripts**: `6_reconstruct_timeseries.py` now supports `--align-stem` flag
+- **Merged visualization scripts**: `12_visualize_gap_filling.py` now supports `--denorm {normalized,ideal,operational}` flag
+- **Archived superseded files**: Moved 6 scripts to `archive/superseded/`
+- **Generated visualizations**:
+  - Denormalized (ideal/LM params): `/home/lukovic/data/treenet/gap_filling_visualization_denorm/`
+  - Operational (input params): `/home/lukovic/data/treenet/gap_filling_visualization_operational/`
+- **Documented critical limitation**: LM parameters not available at inference time (see Section 22)
 
 ---
 
@@ -151,6 +237,14 @@ None of these 8 site/dendrometer combinations appear in training data.
 | **Processed (all)** | `/storage/lukovic/Data/FORWARDS/treenet/processed/` |
 | Pipeline code | `/home/lukovic/codes/treenetai/pipeline_v2` |
 | **Visualizations** | `/home/lukovic/data/treenet/visualizations/` |
+
+### Gap-Filling Visualization Outputs (Updated 2026-01-12)
+
+| Directory | Description | Generated by |
+|-----------|-------------|--------------|
+| `/home/lukovic/data/treenet/gap_filling_visualization/` | Normalized [0,1] figures | `12_visualize_gap_filling.py --denorm normalized` |
+| `/home/lukovic/data/treenet/gap_filling_visualization_denorm/` | Denormalized with LM params (ideal/reference) | `12_visualize_gap_filling.py --denorm ideal` |
+| `/home/lukovic/data/treenet/gap_filling_visualization_operational/` | Denormalized with input params (realistic) | `12_visualize_gap_filling.py --denorm operational` |
 
 ### Temporary & Data Storage Rules ⚠️ CRITICAL
 
@@ -585,7 +679,14 @@ for _ in range(n_gaps):  # For each gap
 ```
 /storage/lukovic/Data/FORWARDS/treenet/processed/swiss_full_yearly_norm/experiments/
 ├── 20260110_145342_with_attention/     # Attention v1
-├── 20260110_153125_attention_v2/       # Attention v2 (current best)
+├── 20260110_153125_attention_v2/       # Attention v2 (current best - yearly norm)
+```
+
+### Current Best Model (Segment-Norm with Attention)
+```
+/storage/lukovic/Data/FORWARDS/treenet/processed/swiss_segment_norm_all_combos/experiments/
+└── 20260111_152352_segment_norm_attention/
+    └── best_model.keras                # Currently used for gap-filling visualizations
 ```
 
 ---
@@ -653,14 +754,29 @@ pipeline_v2/
 │   ├── test_processors.py
 │   ├── test_segmentation.py
 │   └── test_gap_injection.py
+├── archive/                          # Old/superseded code
+│   ├── superseded/                   # Scripts merged into unified versions (2026-01-12)
+│   │   ├── 12_visualize_gap_filling.py    # → merged into new 12_visualize_gap_filling.py
+│   │   ├── 14_reconstruct_from_intermediate.py  # → merged into 6_reconstruct_timeseries.py
+│   │   ├── 15_reconstruct_with_alignment.py     # → merged into 6_reconstruct_timeseries.py
+│   │   ├── 16_train_constrained.py             # → merged into 2_train_model.py
+│   │   ├── 17_visualize_gap_filling_denorm.py  # → merged into 12_visualize_gap_filling.py
+│   │   ├── 18_visualize_gap_filling_operational.py  # → merged into 12_visualize_gap_filling.py
+│   │   ├── 2_train_model.py                    # Original training script
+│   │   └── 6_reconstruct_timeseries.py         # Original reconstruction script
+│   └── ...                           # Other archived code
 ├── 1_build_segments.py               # CLI: Build segments
-├── 2_train_model.py                  # CLI: Train model
-├── 3_evaluate.py                     # CLI: Evaluate
+├── 2_train_model.py                  # CLI: Train model (UNIFIED: --fine-tune, --constrain-rh)
+├── 3_evaluate.py                     # CLI: Evaluate (3 modes)
 ├── 4_visualize_segments.py           # CLI: Visualize segments
 ├── 5_compare_with_raw.py             # CLI: Compare with raw
-├── 6_reconstruct_timeseries.py       # CLI: Gap-fill timeseries
+├── 6_reconstruct_timeseries.py       # CLI: Gap-fill (UNIFIED: --align-stem)
 ├── 7_visualize_reconstruction.py     # CLI: Before/after plots
 ├── 8_visualize_predictions.py        # CLI: Predictions vs truth
+├── 10_plot_gap_evaluation.py         # CLI: Gap evaluation box plots
+├── 11_visualize_gap_injection.py     # CLI: Gap injection visualization
+├── 12_visualize_gap_filling.py       # CLI: Gap filling viz (UNIFIED: --denorm)
+├── 13_batch_reconstruct.py           # CLI: Batch reconstruction
 ├── requirements.txt                  # Dependencies
 ├── PROJECT_CONTEXT.md                # This file
 └── README.md                         # Main documentation
@@ -809,18 +925,84 @@ Location: `{output_dir}/experiments/{timestamp}_{name}/`
 
 ## 13. Pipeline Scripts
 
+### Core Pipeline Scripts (Unified - 2026-01-12)
+
 | Script | Purpose | Key Arguments |
 |--------|---------|---------------|
 | `1_build_segments.py` | Extract 30-day segments | `--country`, `--run-name`, `--norm-scope` |
-| `2_train_model.py` | Train TCN model | `--epochs`, `--batch-size`, `--data-dir` |
+| `2_train_model.py` | **Unified training script** | `--fine-tune`, `--constrain-rh`, `--use-attention` |
 | `3_evaluate.py` | **Unified evaluation script** | `--mode`, `--model-path`, `--recon-path` |
 | `4_visualize_segments.py` | Visualize segments | `--split`, `--n-samples` |
 | `5_compare_with_raw.py` | Compare with raw data | |
-| `6_reconstruct_timeseries.py` | **Gap-filling main script** | `--site-id`, `--model-path` |
+| `6_reconstruct_timeseries.py` | **Unified reconstruction** | `--align-stem`, `--site-id`, `--model-path` |
 | `7_visualize_reconstruction.py` | Before/after plots | `--site-id` |
 | `8_visualize_predictions.py` | Model predictions vs truth | `--experiment-dir`, `--n-samples` |
 | `10_plot_gap_evaluation.py` | Gap-filling box plots | `--gap-days`, `--model-path` |
 | `11_visualize_gap_injection.py` | Visualize gap injection | `--gap-days`, `--n-gaps` |
+| `12_visualize_gap_filling.py` | **Unified visualization** | `--denorm {normalized,ideal,operational}` |
+| `13_batch_reconstruct.py` | Batch reconstruction | `--sites`, `--model-path` |
+
+### 2_train_model.py - Unified Training Script (Updated 2026-01-12)
+
+This script supports multiple training modes via flags:
+
+| Flag | Description | Use Case |
+|------|-------------|----------|
+| `--use-attention` | Enable attention mechanism | Better temporal modeling |
+| `--fine-tune` | Load existing model and continue training | Resume from checkpoint |
+| `--constrain-rh` | Constrain RH output to [0%, 100%] | Physical plausibility |
+
+**Example Usage:**
+```bash
+# Standard training with attention
+python 2_train_model.py --use-attention
+
+# Fine-tune existing model with RH constraints
+python 2_train_model.py --fine-tune --constrain-rh --model-path experiments/best_model.keras
+```
+
+### 6_reconstruct_timeseries.py - Unified Reconstruction Script (Updated 2026-01-12)
+
+Supports optional stem alignment for correct absolute scale:
+
+| Flag | Description | Use Case |
+|------|-------------|----------|
+| `--align-stem` | Compute scale/offset from Nov-Dec overlap | Correct absolute stem values |
+
+**Why alignment is needed:**
+- Model outputs are in normalized space
+- Stem normalization uses different scales for L2 (input) vs LM (output)
+- Alignment uses known overlap period to compute optimal transformation
+
+### 12_visualize_gap_filling.py - Unified Visualization Script (Updated 2026-01-12)
+
+Supports three denormalization modes:
+
+| Mode | Description | Use Case |
+|------|-------------|----------|
+| `normalized` | Keep [0,1] normalized values | Relative comparisons |
+| `ideal` | Use LM params (output_min/diff) | **Reference only** - not available in production |
+| `operational` | Use input params (input_min/diff) | **Realistic deployment** - what we'll have in practice |
+
+**Example Usage:**
+```bash
+# Generate normalized figures (default)
+python 12_visualize_gap_filling.py --denorm normalized
+
+# Generate operational figures (realistic scenario)
+python 12_visualize_gap_filling.py --denorm operational
+```
+
+**⚠️ IMPORTANT:** The `ideal` mode uses LM parameters which are NOT available during real gap-filling (that's what we're trying to generate!). Use `operational` mode to see realistic performance.
+
+### Archived/Superseded Scripts (in `archive/superseded/`)
+
+The following scripts were merged into unified versions:
+- `16_train_constrained.py` → merged into `2_train_model.py` (`--constrain-rh`)
+- `14_reconstruct_from_intermediate.py` → merged into `6_reconstruct_timeseries.py`
+- `15_reconstruct_with_alignment.py` → merged into `6_reconstruct_timeseries.py` (`--align-stem`)
+- `17_visualize_gap_filling_denorm.py` → merged into `12_visualize_gap_filling.py` (`--denorm ideal`)
+- `18_visualize_gap_filling_operational.py` → merged into `12_visualize_gap_filling.py` (`--denorm operational`)
 
 ### 3_evaluate.py - Unified Evaluation Script (Details)
 
@@ -896,9 +1078,182 @@ python 8_visualize_predictions.py \
     --n-samples 10 --split test
 ```
 
+### Bash Wrapper Scripts (Updated 2026-01-12)
+
+Located in `scripts/` directory. These provide a user-friendly interface with configurable settings.
+
+| Script | Python Target | Purpose |
+|--------|---------------|---------|
+| `1_build_segments.sh` | `1_build_segments.py` | Build training segments |
+| `2_train_model.sh` | `2_train_model.py` | Train model (NEW: fine-tune, constrain-rh) |
+| `3_evaluate_model.sh` | `3_evaluate.py` | Evaluate model |
+| `4_visualize_segments.sh` | `4_visualize_segments.py` | Visualize segments |
+| `6_reconstruct_timeseries.sh` | `6_reconstruct_timeseries.py` | Gap-fill (NEW: align-stem) |
+| `7_visualize_reconstruction.sh` | `7_visualize_reconstruction.py` | Before/after plots |
+| `8_visualize_predictions.sh` | `8_visualize_predictions.py` | Predictions vs truth |
+| `12_visualize_gap_filling.sh` | `12_visualize_gap_filling.py` | Gap-filling viz (NEW: denorm modes) |
+| `run_pipeline.sh` | Multiple | Full pipeline execution |
+
+**How to use bash scripts:**
+1. Edit the USER CONFIGURATION section at the top of the script
+2. Run with `./scripts/<script>.sh`
+3. Preview command with `./scripts/<script>.sh --dry-run`
+
+**Example - Training with new flags:**
+```bash
+# Edit scripts/2_train_model.sh:
+FINE_TUNE="true"
+MODEL_PATH="/path/to/best_model.keras"
+CONSTRAIN_RH="true"
+
+# Then run:
+./scripts/2_train_model.sh
+```
+
+**Example - Visualization with denormalization:**
+```bash
+# Edit scripts/12_visualize_gap_filling.sh:
+DENORM_MODE="operational"  # Options: normalized, ideal, operational
+
+# Then run:
+./scripts/12_visualize_gap_filling.sh
+```
+
 ---
 
-## 14. Known Technical Issues & Design Decisions
+## 14. Complete Pipeline Workflow
+
+### Overview Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        TreeNet AI Gap-Filling Pipeline                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+   RAW DATA                  PROCESSED DATA                 MODEL OUTPUTS
+┌──────────────┐          ┌─────────────────┐          ┌─────────────────────┐
+│ server_data/ │          │   model_data/   │          │    experiments/     │
+│  ├─dendro_l2/│   ──►    │  ├─segments/    │   ──►    │  └─YYYYMMDD_HHMMSS/ │
+│  ├─thermo_l1/│          │  ├─intermediate/│          │     ├─best_model    │
+│  ├─hygro_l1/ │          │  └─reports/     │          │     ├─config.json   │
+│  └─meteo/    │          └─────────────────┘          │     └─metrics.json  │
+└──────────────┘                                       └─────────────────────┘
+       │                          │                              │
+       │ 1_build_segments.py      │ 2_train_model.py            │
+       └──────────────────────────┴──────────────────────────────┘
+                                                                 │
+                                                    3_evaluate.py │
+                                                                 │
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              GAP-FILLING                                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+       │                                                         │
+       │ 6_reconstruct_timeseries.py (--align-stem)             │
+       │                                                         │
+       ▼                                                         │
+┌─────────────────┐          ┌─────────────────────────────────────────────┐
+│  reconstructed/ │   ──►    │ 12_visualize_gap_filling.py (--denorm MODE) │
+│  └─site*.ftr    │          └─────────────────────────────────────────────┘
+└─────────────────┘                           │
+                                              ▼
+                              ┌───────────────────────────────────┐
+                              │ gap_filling_visualization[_MODE]/ │
+                              │   └─*.png figures                 │
+                              └───────────────────────────────────┘
+```
+
+### Stage-by-Stage Workflow
+
+**Stage 1: Build Segments**
+```bash
+./scripts/1_build_segments.sh
+# or: python 1_build_segments.py --run-name swiss_segment_norm_all_combos --norm-scope segment
+```
+- Input: Raw sensor data from `server_data/`
+- Output: Training segments in `model_data/segments/`
+- Time: ~30-60 minutes for all Swiss sites
+
+**Stage 2: Train Model**
+```bash
+./scripts/2_train_model.sh
+# or: python 2_train_model.py --use-attention --data-dir .../model_data
+```
+- Input: Segments from Stage 1
+- Output: Trained model in `experiments/YYYYMMDD_HHMMSS/`
+- Time: ~2-4 hours (100 epochs, single GPU)
+
+**Stage 3: Evaluate Model**
+```bash
+./scripts/3_evaluate_model.sh
+# or: python 3_evaluate.py --mode segments --model-path .../best_model.keras
+```
+- Input: Trained model + test segments
+- Output: Metrics JSON in experiment directory
+
+**Stage 4: Reconstruct Time Series (Gap-Filling)**
+```bash
+./scripts/6_reconstruct_timeseries.sh
+# or: python 6_reconstruct_timeseries.py --align-stem --site-id 22
+```
+- Input: Trained model + intermediate time series
+- Output: Gap-filled `.ftr` files in `reconstructed/`
+- NEW: `--align-stem` flag for correct absolute scale
+
+**Stage 5: Visualize Results**
+```bash
+./scripts/12_visualize_gap_filling.sh
+# or: python 12_visualize_gap_filling.py --denorm operational --n-samples 10
+```
+- Input: Trained model + test segments
+- Output: PNG figures in visualization directories
+- NEW: `--denorm` modes for different output scales
+
+### Denormalization Modes Explained
+
+When visualizing or reconstructing, the model outputs normalized values in [0,1]. Three modes are available:
+
+| Mode | Output Directory | Y-axis Labels | Use Case |
+|------|------------------|---------------|----------|
+| `normalized` | `gap_filling_visualization/` | [0,1] range | Comparing relative patterns |
+| `ideal` | `gap_filling_visualization_denorm/` | Physical units (°C, %, μm) | **Reference only** - requires LM data |
+| `operational` | `gap_filling_visualization_operational/` | Physical units (approx.) | **Production use** - uses input params |
+
+**⚠️ Critical**: In production deployment (real gap-filling):
+- LM (ground truth) data is NOT available - that's what we're generating!
+- Only `operational` mode is realistic for deployed models
+- T and RH: Small error (~1-2°C, ~2-5% RH) - acceptable
+- Stem: Larger error (~2-3× scale) - use `--align-stem` for correction
+
+### ⚠️ CRITICAL: Stem Alignment for Multi-Year Reconstruction (Added 2026-01-12)
+
+**THE PROBLEM**: When reconstructing multi-year time series using operational denormalization, the stem channel suffers from severe scale mismatch because each 30-day segment uses its own min/max for normalization.
+
+**THE EVIDENCE**:
+- Without alignment: Stem R² = -2857 (severely negative, predictions worse than mean)
+- With alignment: Stem R² = 0.75 (excellent - proper evaluation)
+
+**THE SOLUTION**: **ALWAYS use stem alignment** when:
+1. Evaluating reconstruction quality vs LM ground truth
+2. Generating multi-year continuous time series
+3. Comparing reconstruction across different sensor combinations
+
+**How Alignment Works**:
+```python
+# Linear regression: LM_stem = slope * recon_stem + intercept
+from scipy import stats
+slope, intercept, r_value, _, _ = stats.linregress(recon_values, lm_values)
+aligned_stem = recon_stem * slope + intercept
+```
+
+**Scripts with Stem Alignment**:
+- `batch_evaluate_test_set.py`: Automatic alignment when LM data available
+- `6_reconstruct_timeseries.py`: Use `--align-stem` flag
+
+**Note**: T and RH don't require alignment because their physical scales are consistent.
+
+---
+
+## 15. Known Technical Issues & Design Decisions
 
 ### Issue 1: Hygrometer Sensor Drift
 
@@ -938,7 +1293,7 @@ python 8_visualize_predictions.py \
 
 ---
 
-## 15. Python Environment & Technology Stack
+## 16. Python Environment & Technology Stack
 
 - **Python version**: 3.10.12
 - **Virtual environment**: `/home/lukovic/pyenv/lamella/bin/python`
@@ -963,7 +1318,7 @@ python 8_visualize_predictions.py \
 
 ---
 
-## 16. GPU & Hardware
+## 17. GPU & Hardware
 
 - **Available GPUs**: 6x NVIDIA RTX 3090 (24GB each)
 - **Check availability**: `nvidia-smi`
@@ -977,7 +1332,7 @@ python 8_visualize_predictions.py \
 
 ---
 
-## 17. Gap Filling & Reconstruction Workflow
+## 18. Gap Filling & Reconstruction Workflow
 
 ### Gap Analysis
 Gaps in time series are identified as periods where timestamps differ by more than the expected interval (10-min for input, 1-hour for output):
@@ -987,7 +1342,7 @@ Gaps in time series are identified as periods where timestamps differ by more th
 | ≤12 days | Fillable by model |
 | >12 days | Marked for alternative handling |
 
-### Reconstruction Process
+### High-Level Reconstruction Process
 
 1. **Gap Analysis** - Identify all gaps ≤12 days in the time series
 2. **Segment Creation** - Create 30-day segments centered on each gap
@@ -1015,7 +1370,189 @@ Gaps in time series are identified as periods where timestamps differ by more th
 
 ---
 
-## 18. Metadata Files
+### Detailed Multi-Year Reconstruction: Step-by-Step (Updated 2026-01-12)
+
+The reconstruction process uses a **sliding window approach** to process long time series (2+ years) through a model trained on 30-day segments.
+
+#### Phase 1: Data Loading
+
+**Input**: Intermediate timeseries file (`.feather`)
+- Contains merged data: `temp_treenet`, `rh_treenet`, `stem`, `tas`, `tasmax`, `tasmin`, `rh`, `vpd`, `gh`, `pr`, `doy`
+- 10-minute resolution (6 samples per hour)
+- Continuous time index
+
+```python
+df = pd.read_feather(intermediate_file)
+df_range = df[(df['ts'] >= year_start) & (df['ts'] < year_end)]
+```
+
+#### Phase 2: Sliding Window Setup
+
+**Parameters**:
+- **Window size**: 30 days = 4,320 input samples (10-min resolution)
+- **Stride**: 24 hours = 144 samples (default)
+- **Result**: Significant overlap between consecutive windows
+
+**Example for 2-year reconstruction**:
+```
+Year range: 2021-01-01 to 2022-12-31 (730 days)
+Input samples: 730 × 24 × 6 = 105,120 samples
+Windows: (105,120 - 4,320) / 144 + 1 ≈ 701 windows
+```
+
+#### Phase 3: Per-Window Processing (Repeated for Each Window)
+
+**Step 3.1: Extract Window**
+```
+Window i starts at: i × stride_samples (= i × 144)
+Window i ends at:   i × stride_samples + 4,320
+```
+
+**Step 3.2: Segment-Level Normalization**
+
+⚠️ **CRITICAL**: Each window is normalized **independently** using its own min/max:
+
+```python
+for each channel in [temp, rh, stem, meteo...]:
+    min_val = np.nanmin(window[:, channel])
+    max_val = np.nanmax(window[:, channel])
+    window_norm[:, channel] = (window[:, channel] - min_val) / (max_val - min_val)
+    
+    # Store for later denormalization
+    norm_params[channel] = {'min': min_val, 'max': max_val}
+```
+
+**Step 3.3: Create Input Mask**
+```python
+mask = (~np.isnan(window)).astype(float)  # 1 where valid, 0 where NaN
+input_array = np.nan_to_num(window_norm, nan=0.0)  # Replace NaN with 0
+```
+
+**Step 3.4: Model Prediction**
+```python
+predictions = model.predict([input_array, mask])
+# predictions[1] = hourly_output: shape (720, 3) = 30 days × 24 hours × 3 channels
+```
+
+**Step 3.5: Denormalization (Using Input Parameters)**
+
+Since LM parameters not available at inference:
+```python
+for channel in [T, RH, stem]:
+    input_min = norm_params[input_channel]['min']
+    input_diff = norm_params[input_channel]['max'] - input_min
+    output_denorm[:, channel] = pred[:, channel] * input_diff + input_min
+```
+
+**Step 3.6: Assign Timestamps**
+```python
+segment_start = window.timestamp[0]
+hourly_times = pd.date_range(start=segment_start, periods=720, freq='1H')
+```
+
+#### Phase 4: Combine Overlapping Predictions
+
+After processing all windows, most timestamps have **multiple predictions**:
+
+```
+Timestamp           | Window 1 | Window 2 | Window 3 | ...
+2021-01-01 00:00    | pred_1   |   -      |    -     |
+2021-01-01 01:00    | pred_1   |   -      |    -     |
+...
+2021-01-02 00:00    | pred_1   | pred_2   |    -     |  ← Overlap begins
+2021-01-02 01:00    | pred_1   | pred_2   |    -     |
+...
+2021-01-03 00:00    | pred_1   | pred_2   | pred_3   |  ← More overlap
+```
+
+**Aggregation**: Simple **averaging** of overlapping predictions:
+```python
+reconstructed = all_predictions.groupby('ts').agg({
+    'recon_T': 'mean',
+    'recon_RH': 'mean',
+    'recon_stem': 'mean'
+}).reset_index()
+```
+
+#### Phase 5: Stem Scale Alignment (Optional, --align-stem)
+
+**Problem**: Denormalization using input params gives wrong absolute stem scale.
+
+**Solution**: Use Nov-Dec overlap period to compute scale correction.
+
+**Step 5.1: Extended Reconstruction Start**
+```
+Requested: 2021-2022
+Actual reconstruction: Nov 2020 - Dec 2022 (starts 2 months early)
+```
+
+**Step 5.2: Extract Alignment Period**
+```python
+recon_align = reconstructed[Nov 2020 : Jan 2021]  # Reconstructed
+lm_align = df_lm[Nov 2020 : Jan 2021]  # Ground truth LM
+```
+
+**Step 5.3: Compute Linear Transformation**
+```python
+# Linear regression: LM = scale × recon + offset
+slope, intercept, r, _, _ = linregress(recon_align['stem'], lm_align['stem'])
+```
+
+**Step 5.4: Apply Correction to All Data**
+```python
+reconstructed['stem'] = reconstructed['stem'] * slope + intercept
+```
+
+#### Visual Summary
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    RECONSTRUCTION FLOW                           │
+└─────────────────────────────────────────────────────────────────┘
+
+RAW INPUT (2 years, 10-min resolution):
+|████████████████████████████████████████████████████████████████|
+0                                                              105,120
+
+SLIDING WINDOWS (30-day each, 24-hour stride):
+|▓▓▓▓▓▓▓▓▓▓▓|                                  Window 1
+    |▓▓▓▓▓▓▓▓▓▓▓|                              Window 2
+        |▓▓▓▓▓▓▓▓▓▓▓|                          Window 3
+            |▓▓▓▓▓▓▓▓▓▓▓|                      Window 4
+                ...
+                                          |▓▓▓▓▓▓▓▓▓▓▓| Window 701
+
+PER-WINDOW PROCESSING:
+┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
+│ Segment Normalize│ → │ Model Predict    │ → │ Denormalize      │
+│ (local min/max)  │    │ (4320→720)       │    │ (input params)   │
+└──────────────────┘    └──────────────────┘    └──────────────────┘
+
+OVERLAP AVERAGING:
+│pred_1│pred_2│pred_3│pred_4│...
+    │pred_2│pred_3│pred_4│pred_5│...
+        │pred_3│pred_4│pred_5│pred_6│...
+═══════════════════════════════════════════
+        FINAL = mean(overlapping predictions)
+
+OUTPUT (2 years, 1-hour resolution):
+|████████████████████████████████████████████████████████████████|
+0                                                              17,520
+```
+
+#### Reconstruction Computational Cost
+
+| Time Range | Windows | Predictions | Approximate Time |
+|------------|---------|-------------|------------------|
+| 1 year | ~350 | ~350 | ~30 seconds |
+| 2 years | ~700 | ~700 | ~60 seconds |
+| 5 years | ~1,750 | ~1,750 | ~2-3 minutes |
+
+Times assume GPU inference with batch size 1 per window.
+
+---
+
+## 19. Metadata Files
 
 | File | Description | Key Columns |
 |------|-------------|-------------|
@@ -1027,7 +1564,7 @@ Gaps in time series are identified as periods where timestamps differ by more th
 
 ---
 
-## 19. Project Statistics & Implementation Status
+## 20. Project Statistics & Implementation Status
 
 ### Code Base
 - **Total Lines:** ~7,000+
@@ -1086,7 +1623,7 @@ Gaps in time series are identified as periods where timestamps differ by more th
 
 ---
 
-## 20. Session Continuity Checklist
+## 21. Session Continuity Checklist
 
 When starting a new session, verify:
 1. ☐ Python environment: `/home/lukovic/pyenv/lamella/bin/python`
@@ -1097,7 +1634,7 @@ When starting a new session, verify:
 
 ---
 
-## 21. Development Priorities
+## 22. Development Priorities
 
 ### ✅ COMPLETED: Stem MSE < 0.025 (2026-01-11)
 
@@ -1135,7 +1672,7 @@ When starting a new session, verify:
 
 ---
 
-## 22. Signal Reconstruction Strategy (Added 2026-01-11)
+## 23. Signal Reconstruction Strategy (Added 2026-01-11)
 
 ### Problem Statement
 
@@ -1371,7 +1908,7 @@ segment_meta.output_diff  # e.g., {'local_T': 23.33, 'stem': 375}    # ← FROM 
 
 ---
 
-## 23. Gap Tracking and Per-Channel Visualization
+## 24. Gap Tracking and Per-Channel Visualization
 
 ### Per-Channel Gap Tracking (Added 2026-01-11)
 
@@ -1448,7 +1985,7 @@ python 7_visualize_reconstruction_v3.py \
 
 ---
 
-## 23.5. Test Site Data Quality Analysis (Added 2026-01-12)
+## 24.5. Test Site Data Quality Analysis (Added 2026-01-12)
 
 ### Train/Test Split Design
 
@@ -1509,7 +2046,7 @@ python 7_visualize_reconstruction_v3.py \
 
 ---
 
-## 23.6. Gap-Filling Performance Evaluation (Added 2026-01-12)
+## 24.6. Gap-Filling Performance Evaluation (Added 2026-01-12)
 
 ### Evaluation Methodology
 
@@ -1584,7 +2121,7 @@ This demonstrates the model has learned meaningful patterns from surrounding con
 
 ---
 
-## 23.7. Production Reconstruction with Scale Alignment (Added 2026-01-12)
+## 24.7. Production Reconstruction with Scale Alignment (Added 2026-01-12)
 
 ### The Scale Alignment Problem
 
@@ -1679,6 +2216,52 @@ When reconstructing time series from raw L1/L2 data, the **stem channel** has a 
 - All three L1/L2 input channels must have NaN values
 - For site86_T920_H917_D911 (2021-2022): Found 9 gap regions totaling ~3900 hours
 
+### Understanding Data Gaps in Raw Input (Added 2026-01-12)
+
+**IMPORTANT**: Data gaps in TreeNet sensor data can manifest in TWO different ways:
+
+#### Gap Type 1: Missing Timestamps (No Row Exists)
+The time series has missing rows - there is no record at all for certain timestamps. This typically occurs when:
+- Sensor communication failed completely
+- Data transmission was interrupted
+- Sensor was offline for maintenance
+
+**Detection method**: 
+- Reindex the dataframe to a complete 10-minute time grid
+- Missing timestamps become NaN values after reindexing
+
+**Example** (site22, 2021-2022):
+```
+Expected samples (2 years, 10-min): 105,120
+Actual samples: 102,821
+Missing timestamps: 2,299 (gap regions at end of Dec 2021 and Dec 2022)
+```
+
+#### Gap Type 2: Present Timestamps with NaN Values
+The timestamp exists in the data, but the value is NaN (missing). This typically occurs when:
+- Sensor recorded a timestamp but measurement failed
+- Quality control flagged and removed bad values
+- Partial data transmission
+
+**Detection method**: Check for NaN values in existing rows
+
+#### Combined Gap Detection
+
+When visualizing or analyzing gaps, **ALWAYS**:
+1. First reindex to a complete time grid (e.g., 10-min intervals for raw data, 1-hour for processed)
+2. Then check for NaN values
+3. Both types of gaps will now appear as NaN
+
+**Code pattern for proper gap detection:**
+```python
+# Create complete time index
+complete_idx = pd.date_range(start, end, freq='10min', tz='UTC')
+# Reindex - missing timestamps become NaN
+df_complete = df.reindex(complete_idx)
+# Now check for gaps (both types are NaN)
+is_gap = df_complete['column'].isna()
+```
+
 ### Known Limitation: Stem Amplitude Compression (2026-01-12)
 
 For some dendrometers (especially D911), the scale alignment based on Nov-Dec warmup period can **compress the amplitude** of seasonal variations:
@@ -1738,7 +2321,192 @@ This is justified because:
 
 ---
 
-## 24. TODO / Future Tasks
+## 26. Current Pipeline Limitations (2026-01-12)
+
+### Limitation 1: Denormalization at Inference (CRITICAL)
+
+**Problem**: Segment-level normalization uses DIFFERENT parameters for input (L2) and output (LM). At inference time, we don't have LM data (that's what we're generating!).
+
+| Aspect | Training | Inference |
+|--------|----------|-----------|
+| Input normalization | Use L2 min/max | Use L2 min/max ✅ |
+| Output denormalization | Use LM min/max | **NO LM available** ❌ |
+
+**Impact by channel:**
+- **Temperature**: ~1-2°C error - acceptable
+- **Relative Humidity**: ~2-5% error - acceptable  
+- **Stem**: ~2-3× scale error - problematic
+
+**Current workarounds:**
+- `--denorm operational`: Use input params (approximate for T/RH)
+- `--align-stem`: Use overlap period to compute scale correction
+
+### Limitation 2: Segment Boundary Effects
+
+**Problem**: 30-day segments are normalized independently. Predictions at segment boundaries may have discontinuities when reconstructing longer time series.
+
+**Symptom**: Small jumps in reconstructed signal at segment join points.
+
+**Current mitigation**: Overlapping segments with averaging in overlap regions.
+
+### Limitation 3: Single-Stage Learning
+
+**Problem**: Model learns TWO tasks simultaneously:
+1. Gap-filling (reconstruct missing 10-min data)
+2. Quality enhancement (10-min → 1-hour, L2 → LM quality)
+
+**Impact**: Conflating tasks may limit performance on both.
+
+### Limitation 4: Stem Channel Complexity
+
+**Problem**: Stem dendrometer signals have:
+- Non-periodic long-term trends (growth)
+- Arbitrary baseline (sensor-specific)
+- Different scale in L2 vs LM (post-processing effects)
+
+**Impact**: Stem predictions have correct patterns but wrong absolute scale.
+
+### Limitation 5: No Physical Constraints in Model
+
+**Problem**: Current model doesn't enforce physical bounds:
+- RH should be in [0%, 100%]
+- Temperature should be physically plausible
+- Stem radius should be non-decreasing over long periods
+
+**Status**: RH constraint being added via `--constrain-rh` flag.
+
+### Limitation 6: Site Generalization for Outliers
+
+**Problem**: Some holdout test sites (e.g., Site 86, D911) have unusual data patterns that the model hasn't learned.
+
+**Impact**: Poor correlation (e.g., stem R²=0.25) on some test site/sensor combinations.
+
+---
+
+## 27. Proposed Alternative Approach (For Future Implementation)
+
+This section documents a potentially improved approach, to be considered for future development.
+
+### Core Idea: Two-Stage Pipeline
+
+Instead of one model learning both gap-filling AND quality enhancement:
+
+```
+CURRENT (Single-Stage):
+L2 (with gaps) → [Single Model] → LM-quality output
+
+PROPOSED (Two-Stage):
+L2 (with gaps) → [Stage 1: Gap-Fill] → L2 (no gaps) → [Stage 2: Enhance] → LM-quality
+```
+
+**Stage 1: Gap-Filling Model**
+- Input: L2 data (10-min) with gaps
+- Output: L2 data (10-min) WITHOUT gaps
+- **Key advantage**: Input and output are SAME scale → no denormalization problem!
+
+**Stage 2: Quality Enhancement Model**
+- Input: Gap-filled L2 data (from Stage 1)
+- Output: LM-quality hourly data
+- Only trained on gap-free data
+
+### Proposed: Global Normalization
+
+Instead of segment-level normalization (current approach):
+
+```python
+# Current: segment-level (different for each 30-day window)
+segment_norm = (segment - segment.min()) / (segment.max() - segment.min())
+
+# Proposed: global normalization (same constants for ALL data)
+GLOBAL_STATS = {
+    'temp': {'min': -30, 'max': 50},      # °C, physical bounds
+    'rh':   {'min': 0, 'max': 100},       # %, physical bounds  
+    'stem': {'min': 0, 'max': 50000},     # μm, typical range
+}
+global_norm = (data - GLOBAL_STATS[channel]['min']) / (GLOBAL_STATS[channel]['max'] - GLOBAL_STATS[channel]['min'])
+```
+
+**Benefits:**
+- Same normalization everywhere → denormalization is trivial
+- Model learns absolute values, not just relative patterns
+- Cross-segment predictions are consistent
+
+### Proposed: Masked Autoencoder Architecture
+
+Replace TCN with Temporal Masked Autoencoder (inspired by computer vision MAE):
+
+```
+Architecture:
+1. Encoder: Process ONLY non-gap timesteps (masked attention)
+2. Positional encoding: Preserve temporal position information
+3. Decoder: Reconstruct ALL timesteps including gaps
+4. Loss: Compute only on gap regions
+```
+
+**Benefits:**
+- Natural fit for gap-filling task
+- No information leakage from gap regions
+- Attention can capture long-range dependencies
+
+### Proposed: Curriculum Learning
+
+Instead of random gap injection from start:
+
+```
+Phase 1 (Epochs 1-30):   Small gaps (1-3 days)
+Phase 2 (Epochs 31-60):  Medium gaps (3-7 days)  
+Phase 3 (Epochs 61-100): Large gaps (7-14 days)
+```
+
+**Benefits:**
+- Learn easy patterns first
+- Gradually develop long-range modeling capability
+- More stable training
+
+### Proposed: Channel-Specific Decoders
+
+Different channels have different characteristics:
+
+| Channel | Characteristic | Strategy |
+|---------|---------------|----------|
+| Temperature | Strong daily/seasonal cycle | Leverage meteo heavily |
+| RH | Correlated with T | Condition on T prediction |
+| Stem | Long-term trend, no cycle | Need longer context |
+
+**Proposed architecture:**
+```
+Shared Encoder → Channel-specific Decoders
+         │
+         ├── T Decoder (meteo-conditioned)
+         ├── RH Decoder (T-conditioned + meteo)
+         └── Stem Decoder (long-context attention)
+```
+
+### Proposed: Calibration-Based Deployment
+
+For production deployment where LM data is unavailable:
+
+```
+Calibration Workflow:
+1. Identify small period where LM exists (e.g., Nov-Dec prior year)
+2. Run model on that period (gap-free input)
+3. Compare model output to LM → compute calibration offsets
+4. Apply calibration to all future predictions
+```
+
+This formalizes the current `--align-stem` approach as standard practice.
+
+### Implementation Priority
+
+If implementing the alternative approach:
+
+1. **High priority**: Global normalization (simplest, biggest impact)
+2. **Medium priority**: Two-stage pipeline (architectural change)
+3. **Lower priority**: MAE architecture, curriculum learning (research experiments)
+
+---
+
+## 28. TODO / Future Tasks
 
 ### High Priority
 

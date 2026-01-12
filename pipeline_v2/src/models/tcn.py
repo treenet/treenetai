@@ -421,11 +421,17 @@ class TCNModel:
     @staticmethod
     def load(filepath: str) -> keras.Model:
         """Load model from file."""
+        # Placeholder loss function for constrained models
+        def constrained_hourly_loss(y_true, y_pred):
+            import tensorflow as tf
+            return tf.reduce_mean(tf.abs(y_true - y_pred))
+        
         return keras.models.load_model(
             filepath,
             custom_objects={
                 'TCNBlock': TCNBlock,
-                'PositionalEncoding': PositionalEncoding
+                'PositionalEncoding': PositionalEncoding,
+                'constrained_hourly_loss': constrained_hourly_loss
             }
         )
 

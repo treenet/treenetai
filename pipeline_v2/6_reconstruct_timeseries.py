@@ -46,6 +46,11 @@ sys.path.insert(0, str(Path(__file__).parent))
 from src.models.tcn import TCNBlock, PositionalEncoding
 from src.data.segmentation import Normalizer
 
+# Custom loss function for loading models trained with constrained RH
+def constrained_hourly_loss(y_true, y_pred):
+    """Placeholder loss function for model loading."""
+    return tf.reduce_mean(tf.abs(y_true - y_pred))
+
 # Suppress TensorFlow warnings
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
@@ -102,8 +107,8 @@ Examples:
     # Processing options
     parser.add_argument('--stride-hours', type=int, default=24,
                         help='Sliding window stride in hours')
-    parser.add_argument('--combo-ids', type=int, nargs='+', default=None,
-                        help='Specific combination IDs to process (default: all)')
+    parser.add_argument('--combo-ids', type=str, nargs='+', default=None,
+                        help='Specific combination patterns to filter (e.g., site22_T119_H118_D120)')
     
     # Output options
     parser.add_argument('--output-mode', type=str, default='input_scale',
@@ -120,7 +125,11 @@ class IntermediateReconstructor:
     def __init__(self, model_path: str, verbose: bool = False):
         self.model = tf.keras.models.load_model(
             model_path,
-            custom_objects={'TCNBlock': TCNBlock, 'PositionalEncoding': PositionalEncoding}
+            custom_objects={
+                'TCNBlock': TCNBlock, 
+                'PositionalEncoding': PositionalEncoding,
+                'constrained_hourly_loss': constrained_hourly_loss
+            }
         )
         self.verbose = verbose
         if verbose:
@@ -327,11 +336,12 @@ def main():
     reconstructor = IntermediateReconstructor(args.model_path, verbose=args.verbose)
     
     # Find intermediate files
-    intermediate_files = sorted(glob(f"{args.intermediate_dir}/*.feather"))
+    intermediate_files = sorted(glob(f"{args.intermediate_dir}/*.ftr") + glob(f"{args.intermediate_dir}/*.feather"))
     
     if args.combo_ids:
+        # Filter by combo pattern in filename (e.g., "site22" if combo_id is "site22")
         intermediate_files = [f for f in intermediate_files 
-                            if any(f"combo_{cid}_" in f for cid in args.combo_ids)]
+                            if any(str(cid) in Path(f).stem for cid in args.combo_ids)]
     
     print(f"\nFound {len(intermediate_files)} intermediate files")
     

@@ -9,6 +9,11 @@
 #   2. Run: ./scripts/2_train_model.sh
 #   3. Or dry-run first: ./scripts/2_train_model.sh --dry-run
 #
+# NEW FLAGS (2026-01-12):
+#   --fine-tune: Continue training from existing model checkpoint
+#   --constrain-rh: Constrain RH output to physical bounds [0%, 100%]
+#   --use-attention: Enable multi-head attention mechanism
+#
 #===============================================================================
 
 set -e  # Exit on error
@@ -31,6 +36,21 @@ OUTPUT_ROOT="/storage/lukovic/Data/FORWARDS/treenet/processed"
 # Optional: custom experiment name (leave empty for timestamp only)
 # Examples: "baseline", "larger_model", "test_1"
 EXPERIMENT_NAME="segment_norm_attention"
+
+# ─────────────────────────────────────────────────────────────────────────────────
+# FINE-TUNING / CONSTRAINTS (NEW 2026-01-12)
+# ─────────────────────────────────────────────────────────────────────────────────
+# Enable fine-tuning from existing model: true/false
+# If true, set MODEL_PATH to the existing model checkpoint
+FINE_TUNE="false"
+
+# Path to existing model checkpoint (only used if FINE_TUNE="true")
+MODEL_PATH=""
+# Example: "/storage/lukovic/Data/FORWARDS/treenet/processed/swiss_segment_norm_all_combos/experiments/20260111_152352_segment_norm_attention/best_model.keras"
+
+# Constrain RH output to physical bounds [0%, 100%]: true/false
+# Adds hard clipping to ensure physically plausible humidity values
+CONSTRAIN_RH="false"
 
 # ─────────────────────────────────────────────────────────────────────────────────
 # MODEL ARCHITECTURE HYPERPARAMETERS
@@ -144,6 +164,9 @@ PYTHON="/home/lukovic/pyenv/lamella/bin/python"
 RUN_NAME="${RUN_NAME_ENV:-$RUN_NAME}"
 OUTPUT_ROOT="${OUTPUT_ROOT_ENV:-$OUTPUT_ROOT}"
 EXPERIMENT_NAME="${EXPERIMENT_NAME_ENV:-$EXPERIMENT_NAME}"
+FINE_TUNE="${FINE_TUNE_ENV:-$FINE_TUNE}"
+MODEL_PATH="${MODEL_PATH_ENV:-$MODEL_PATH}"
+CONSTRAIN_RH="${CONSTRAIN_RH_ENV:-$CONSTRAIN_RH}"
 N_FILTERS="${N_FILTERS_ENV:-$N_FILTERS}"
 KERNEL_SIZE="${KERNEL_SIZE_ENV:-$KERNEL_SIZE}"
 N_BLOCKS="${N_BLOCKS_ENV:-$N_BLOCKS}"
@@ -196,6 +219,11 @@ run_name = ${RUN_NAME}
 data_dir = ${DATA_DIR}
 experiment_dir = ${EXPERIMENT_DIR}
 experiment_name = ${EXPERIMENT_NAME}
+
+[fine_tuning]
+fine_tune = ${FINE_TUNE}
+model_path = ${MODEL_PATH}
+constrain_rh = ${CONSTRAIN_RH}
 
 [model_architecture]
 model_type = tcn
@@ -281,6 +309,18 @@ if [ "${USE_ATTENTION}" = "true" ]; then
     CMD="${CMD} --attention-key-dim ${ATTENTION_KEY_DIM}"
 fi
 
+# NEW FLAGS (2026-01-12)
+if [ "${FINE_TUNE}" = "true" ]; then
+    CMD="${CMD} --fine-tune"
+    if [ -n "${MODEL_PATH}" ]; then
+        CMD="${CMD} --model-path ${MODEL_PATH}"
+    fi
+fi
+
+if [ "${CONSTRAIN_RH}" = "true" ]; then
+    CMD="${CMD} --constrain-rh"
+fi
+
 if [ "${VERBOSE}" = "true" ]; then
     CMD="${CMD} --verbose"
 fi
@@ -307,6 +347,10 @@ log "  Architecture: ${N_FILTERS} filters, ${N_BLOCKS} blocks, kernel=${KERNEL_S
 log "  Attention: ${USE_ATTENTION} (heads=${N_ATTENTION_HEADS}, key_dim=${ATTENTION_KEY_DIM})"
 log "  Training: ${EPOCHS} epochs, batch=${BATCH_SIZE}, lr=${LEARNING_RATE}"
 log "  Gaps: ${MIN_GAP_DAYS}-${MAX_GAP_DAYS} days (enabled: ${ENABLE_GAPS})"
+log "  Fine-tune: ${FINE_TUNE}, Constrain RH: ${CONSTRAIN_RH}"
+if [ "${FINE_TUNE}" = "true" ] && [ -n "${MODEL_PATH}" ]; then
+    log "  Model path: ${MODEL_PATH}"
+fi
 
 # Run with logging
 cd "${PIPELINE_DIR}"
