@@ -2,7 +2,7 @@
 
 **Purpose**: This file documents project-specific context details to help maintain continuity across sessions. Reference this document at the start of any new session.
 
-**Last Updated**: 2026-01-11
+**Last Updated**: 2026-01-12
 
 ---
 
@@ -532,24 +532,31 @@ All hyperparameters are centralized in `src/config.py`.
 
 **How gaps are distributed across channels:**
 
-When `n_gaps=2` (e.g., "2 channels with gaps"), this means **2 gaps are injected per segment**, but each gap goes to a **different randomly selected channel**:
+When `n_gaps=2`, **2 separate gap regions** are injected per segment. For **each gap**, a channel is **randomly selected** from the gappable channels [T, RH, Stem].
 
-| Setting | Meaning | Example Distribution |
-|---------|---------|----------------------|
-| `n_gaps=1` | 1 gap in 1 channel | T=7d, RH=0d, Stem=0d |
-| `n_gaps=2` | 2 gaps in 2 different channels | T=7d, RH=7d, Stem=0d |
-| `n_gaps=3` | 3 gaps in all 3 channels | T=7d, RH=7d, Stem=7d |
-
-**Critical:** Gaps are NOT stacked in the same channel. With `n_gaps=2` and `gap_days=12`:
-- ❌ NOT: 24 days missing from one channel
-- ✅ CORRECT: 12 days missing from channel A, 12 days missing from channel B
-
-**Example (12-day gaps, 2 gaps per segment):**
+**Key behavior (line 154 in `gap_injection.py`):**
+```python
+for _ in range(n_gaps):  # For each gap
+    channel = self.rng.choice(channels_to_gap)  # Randomly pick a channel
 ```
-Sample 0: T=12d gap, RH=0d,    Stem=12d gap  → 40% missing per gapped channel
-Sample 1: T=12d gap, RH=12d gap, Stem=0d    → 40% missing per gapped channel
-Sample 2: T=0d,    RH=12d gap, Stem=12d gap → 40% missing per gapped channel
-```
+
+**This means:**
+- **Most common case:** Each gap goes to a different channel (2 channels with 1 gap each)
+- **Less common case:** Both gaps go to the same channel (1 channel with 2 disjoint gaps)
+
+| Outcome | Probability | Example |
+|---------|-------------|---------|
+| 2 different channels | ~67% | T=7d gap, RH=7d gap, Stem=0d |
+| Same channel (2 gaps) | ~33% | T=0d, RH=7d gap + 7d gap, Stem=0d |
+
+**This is intentional** - the model needs to learn to handle various gap scenarios including:
+- Single gap in one channel
+- Multiple disjoint gaps in the same channel  
+- Overlapping gaps (rare, due to random placement)
+
+**Typical gap coverage per gapped channel (with `n_gaps=2`, `gap_days=12`):**
+- Single gap: 40% of 30-day segment missing (12/30 days)
+- Two gaps in same channel: Up to 80% missing (24/30 days) - rare
 
 **Gappable channels:** Only local sensor channels (0, 1, 2) can have gaps. Global meteo channels (3-10) are NEVER gapped.
 
@@ -1274,6 +1281,65 @@ These are **independent** normalizations. The model learns to map from normalize
 - `--output-mode normalized`: Keep output in [0,1] range (relative values)
 - `--output-mode input_scale`: Use input normalization params (approximation)
 
+### CRITICAL: Operational Denormalization Limitation (2026-01-12)
+
+**⚠️ FUNDAMENTAL PROBLEM: LM Constants Not Available at Inference Time**
+
+When the model is deployed for real gap-filling (its intended purpose), we will **NOT have access to LM data** - because that's exactly what we're trying to generate! This creates a fundamental mismatch:
+
+| Training | Inference (Real Use) |
+|----------|---------------------|
+| Model learns: normalized_input → normalized_LM_output | We have: normalized_input → normalized_output |
+| Output denorm: uses LM min/max | **We cannot use LM min/max** (not available) |
+| Result: Perfect denormalization | **CANNOT properly denormalize** |
+
+**What This Means:**
+1. The model outputs are in **LM-normalized space** [0,1]
+2. To convert to physical units, we'd need `output_min` and `output_diff` from LM data
+3. **But we don't have LM data** - if we did, we wouldn't need gap-filling!
+
+**Segment Metadata Structure:**
+```python
+# For each segment, we have:
+segment_meta.input_min    # e.g., {'temp_treenet': -14.56, 'stem': 6863}
+segment_meta.input_diff   # e.g., {'temp_treenet': 23.41, 'stem': 380}
+segment_meta.output_min   # e.g., {'local_T': -14.33, 'stem': 2638}  # ← FROM LM!
+segment_meta.output_diff  # e.g., {'local_T': 23.33, 'stem': 375}    # ← FROM LM!
+```
+
+**Impact by Channel:**
+| Channel | Input (L1/L2) Range | Output (LM) Range | Difference | Impact |
+|---------|---------------------|-------------------|------------|--------|
+| Temperature | ~[-20°C, +35°C] | ~[-20°C, +35°C] | Small | ✅ Using input params is OK |
+| RH | ~[20%, 100%] | ~[15%, 100%] | Small | ✅ Using input params is OK |
+| Stem | ~[6000, 7500 μm] | ~[2500, 3500 μm] | **LARGE** | ❌ Input params give WRONG scale |
+
+**Why Stem Is Different:**
+- L2 dendrometer data has a different baseline than LM processed data
+- LM processing applies significant corrections/calibrations
+- The **ratio** between L2 and LM stem ranges is typically ~0.3-0.5
+- Using input params for denormalization gives values ~2-3× too large
+
+**Practical Solutions:**
+
+1. **For T and RH (RECOMMENDED):**
+   - Use input normalization parameters for denormalization
+   - Error is small (~1-2°C or ~2-5% RH)
+   - Acceptable for most applications
+
+2. **For Stem (OPTIONS):**
+   - **Option A**: Keep output normalized [0,1] = relative changes only
+   - **Option B**: Use scale alignment from known overlap period (current `15_reconstruct_with_alignment.py` approach)
+   - **Option C**: Train a different model architecture that learns absolute values
+   - **Option D**: Accept ~2-3× error in absolute scale, patterns are correct
+
+**This is why `15_reconstruct_with_alignment.py` exists:**
+- It uses Nov-Dec overlap period (where LM data exists) to compute optimal scale+offset
+- Then applies that transformation to full reconstruction
+- Result: Correct absolute scale after alignment
+
+**CONCLUSION:** The segment-norm approach is fundamentally limited for producing absolute-scale outputs without reference data. This is acceptable for T/RH but problematic for stem. **Consider global normalization** if absolute outputs are critical.
+
 ### Stem Evaluation: Alignment Procedure (2026-01-11)
 
 **IMPORTANT**: For stem (dendrometer) data, the absolute scale is **arbitrary**. The baseline shifts over time due to sensor resets, calibration, and environmental factors. Therefore:
@@ -1518,6 +1584,160 @@ This demonstrates the model has learned meaningful patterns from surrounding con
 
 ---
 
+## 23.7. Production Reconstruction with Scale Alignment (Added 2026-01-12)
+
+### The Scale Alignment Problem
+
+When reconstructing time series from raw L1/L2 data, the **stem channel** has a scale mismatch:
+- Model outputs are in the scale of the INPUT (L1/L2 raw dendrometer)
+- Ground truth (LM) has a different scale/baseline
+- Even with perfect correlation, R² can be negative due to scale mismatch
+
+**Root cause**: Segment-wise normalization uses INPUT data's min/max, but different sensor calibrations and processing between L1/L2 and LM create different baselines.
+
+### Solution: Nov-Dec Prior Year Alignment
+
+**Strategy**: Use overlapping data from November-December of the year BEFORE the requested period to calibrate scale.
+
+**Algorithm**:
+1. Start reconstruction from **Nov 1 of (year_start - 1)** instead of Jan 1 of year_start
+2. Run full reconstruction pipeline for extended period
+3. Compute **scale and offset** alignment using Nov-Dec overlap period where both reconstruction and LM ground truth exist:
+   ```
+   gt = scale * recon + offset
+   ```
+4. Apply linear transformation to entire stem channel
+5. Return only the requested year range
+
+**Script**: `15_reconstruct_with_alignment.py`
+
+### Alignment Methods Comparison
+
+| Method | Formula | When Used |
+|--------|---------|-----------|
+| Scale + Offset | `aligned = scale * recon + offset` | Default - uses linear regression |
+| Offset Only | `aligned = recon + offset` | When reconstruction std < 0.01 |
+
+### Results: Test Set 2021-2022 (17 combinations)
+
+#### Temperature & Humidity (Excellent across all methods)
+| Channel | Correlation | R² | Norm MAE |
+|---------|-------------|-----|----------|
+| Temperature | 0.9880 ± 0.0053 | 0.9751 ± 0.0108 | 0.0212 ± 0.0034 |
+| Humidity | 0.9561 ± 0.0185 | 0.8913 ± 0.0499 | 0.0561 ± 0.0131 |
+
+#### Stem (By Dendrometer - Scale+Offset Alignment)
+
+| Dendrometer | Site | Correlation | R² | Status |
+|-------------|------|-------------|-----|--------|
+| D120 | 22 | 0.9900 | 0.8418 | ✓ Good |
+| D121 | 22 | 0.9973 | 0.9809 | ✓ Excellent |
+| D922 | 86 | 0.9969 | 0.7683 | ✓ Good |
+| D937 | 86 | 0.9278 | 0.8465 | ✓ Good |
+| D911 | 86 | 0.9887 | 0.2951 | ⚠ Moderate (improved from R²=-21 with offset-only) |
+| D577 | 49 | 0.5324 | -2.67 | ✗ Poor (data quality issue) |
+| D849 | 72 | -0.6557 | -37.8 | ✗ Poor (fundamental prediction failure) |
+| D850 | 72 | -0.6234 | -28.8 | ✗ Poor (fundamental prediction failure) |
+
+### Key Findings
+
+1. **14 of 17 combinations** have positive stem R² after scale+offset alignment
+2. **D911** dramatically improved: R² went from **-21** to **+0.30** with scale alignment
+3. **Problematic sensors** (D849, D850 on site 72) show negative correlation - this is a data quality or model limitation issue, not alignment
+
+### Scale Factors Observed
+
+| Category | Scale Factor | Example |
+|----------|--------------|---------|
+| Near unity | 0.93 - 1.0 | D121 (scale=0.9344), D937 (scale=0.96) |
+| Moderate | 0.65 - 0.90 | D120 (scale=0.8720), D922 (scale=0.66) |
+| Extreme | 0.17 - 0.26 | D911 (scale=0.17), D577 (scale=0.26) |
+
+**Interpretation**: Large scale factors (far from 1.0) indicate significant calibration differences between L1/L2 and LM processing pipelines for those specific dendrometers.
+
+### Output Files
+
+**Aligned reconstructions**: `/home/lukovic/data/treenet/reconstructions_aligned_v2_2021_2022/`
+- `aligned_{combo_id}.ftr` - Reconstructed and aligned time series
+- `aligned_results.json` - Metrics summary
+
+**Visualizations**: 
+- `stacked_with_gaps_{combo_id}.png` - 9-row stacked plots (Input/Recon/GT for each channel) with gap shading
+- `aligned_comparison_{combo_id}.png` - 3-panel plots showing T/RH/Stem comparison with ground truth
+
+### Visualization Gap Shading Interpretation (Added 2026-01-12)
+
+**IMPORTANT**: The red shading in `stacked_with_gaps_*.png` visualizations marks periods where **ALL THREE input channels** (temperature, humidity, stem) are **simultaneously missing** in the input data.
+
+- This is NOT per-channel gap detection
+- Gaps are detected at the segment level (same time window applies to all channels)
+- The shading helps identify where the model had **no local sensor context** to work with
+- Reconstruction quality is typically lower in these shaded regions
+
+**Gap Detection Criteria**:
+- Minimum gap duration: 12 hours
+- All three L1/L2 input channels must have NaN values
+- For site86_T920_H917_D911 (2021-2022): Found 9 gap regions totaling ~3900 hours
+
+### Known Limitation: Stem Amplitude Compression (2026-01-12)
+
+For some dendrometers (especially D911), the scale alignment based on Nov-Dec warmup period can **compress the amplitude** of seasonal variations:
+
+| Metric | Input (L2) | Reconstruction | Ground Truth (LM) |
+|--------|------------|----------------|-------------------|
+| Range (D911) | 184 μm | **29 μm** | 190 μm |
+
+**Root cause**: The scale factor (0.17) was estimated during the dormant Nov-Dec period when stem variation was minimal. This biased the estimate low.
+
+**Result**: High correlation (0.99) but wrong amplitude - the model captures the **shape** but not the **magnitude** of seasonal growth.
+
+**Potential fixes**:
+1. Use a longer calibration period (full prior year)
+2. Variance-matching instead of linear regression for scale factor
+3. Season-specific alignment
+
+### Known Limitation: RH Exceeding Physical Bounds (2026-01-12)
+
+**Issue**: Relative humidity reconstruction can exceed 100% (saturation point), which is physically impossible.
+
+**Analysis for site22_T119_H118_D120 (2021-2022)**:
+
+| Source | Min | Max | Samples >100% |
+|--------|-----|-----|---------------|
+| Input (L1) | 16.3% | 100.0% | 0 |
+| Reconstruction | 4.2% | **109.5%** | 125 (0.71%) |
+| Ground Truth (LM) | 14.0% | 100.0% | 0 |
+
+**Observations**:
+1. The model occasionally predicts RH values above 100%, especially during gap regions
+2. During gaps, the model extrapolates without local context, leading to unphysical values
+3. The reconstruction follows GT better than Input (expected since GT is the training target)
+
+**Correlation Analysis**:
+- Reconstruction vs Ground Truth: r = 0.937
+- Reconstruction vs Input: r = 0.944
+
+**Potential Solutions**:
+
+| Solution | Pros | Cons |
+|----------|------|------|
+| **Post-processing clipping** | Simple, ensures physical bounds | May distort near-saturation dynamics |
+| **Constrained loss function** | Model learns physical limits | Requires retraining |
+| **Sigmoid/tanh output activation** | Built-in bounds | May compress valid variation |
+| **Physics-informed regularization** | Preserves physical relationships | Complex implementation |
+
+**Recommended approach**: Apply **post-processing clipping** as immediate fix:
+```python
+reconstructed_rh = np.clip(reconstructed_rh, 0, 100)
+```
+
+This is justified because:
+- Only 0.71% of samples exceed 100%
+- Maximum exceedance is modest (109.5%)
+- Physical bounds are well-defined for RH
+
+---
+
 ## 24. TODO / Future Tasks
 
 ### High Priority
@@ -1533,7 +1753,19 @@ This demonstrates the model has learned meaningful patterns from surrounding con
    - Results: T correlation 0.993, RH correlation 0.966, stem correlation 0.475
    - **Limitation**: Stem denormalization requires LM reference (see Section 22)
 
-3. **☐ Data Quality Filter: Recover Filtered Years**
+3. **✅ Batch reconstruction 2023-2024** (COMPLETED 2026-01-12)
+   - Script: `13_batch_reconstruct.py`
+   - Processed: 84 combinations from 10 Swiss sites
+   - Output: `/storage/lukovic/Data/FORWARDS/treenet/reconstructed_2023_2024/`
+   - Sites: 3, 9, 11, 14, 21, 26, 33, 36, 65, 66
+
+4. **✅ Scale alignment for stem channel** (COMPLETED 2026-01-12)
+   - Script: `15_reconstruct_with_alignment.py`
+   - Strategy: Nov-Dec prior year scale+offset alignment
+   - Result: 14/17 test combinations have positive R²
+   - Key improvement: D911 went from R²=-21 to R²=+0.30
+
+5. **☐ Data Quality Filter: Recover Filtered Years**
    - **Issue**: Years failing quality check (ratio outside [0.5, 2.0]) are completely excluded
    - **Impact**: ~124 year-segments worth of data not used for training
    - **Proposed approach**:

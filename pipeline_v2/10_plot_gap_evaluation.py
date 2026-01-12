@@ -335,7 +335,7 @@ def create_unified_error_plot(all_results, gap_days_list, output_dir, dpi, n_seg
     # Overall title
     gap_str = ', '.join([f'{d}d' for d in gap_days_list])
     fig.suptitle(f'Gap-Filling Performance: Absolute Error Distribution\n'
-                f'({n_segments} × 30-day test segments, 2 channels with gaps)', 
+                f'({n_segments} × 30-day test segments, 2 random gaps per segment)', 
                 fontsize=14, fontweight='bold', y=1.02)
     
     plt.tight_layout()
@@ -456,7 +456,7 @@ def create_unified_rmse_plot(all_results, gap_days_list, output_dir, dpi, n_segm
     
     # Overall title
     fig.suptitle(f'Gap-Filling Performance: MSE Distribution\n'
-                f'({n_segments} × 30-day test segments, 2 channels with gaps)', 
+                f'({n_segments} × 30-day test segments, 2 random gaps per segment)', 
                 fontsize=14, fontweight='bold', y=1.02)
     
     plt.tight_layout()
@@ -560,7 +560,7 @@ def create_unified_correlation_plot(all_results, gap_days_list, output_dir, dpi,
     # Overall title
     gap_str = ', '.join([f'{d}d' for d in gap_days_list])
     fig.suptitle(f'Gap-Filling Performance: Correlation Distribution (per segment)\n'
-                f'({n_segments} × 30-day test segments, 2 channels with gaps)', 
+                f'({n_segments} × 30-day test segments, 2 random gaps per segment)', 
                 fontsize=14, fontweight='bold', y=1.02)
     
     plt.tight_layout()
