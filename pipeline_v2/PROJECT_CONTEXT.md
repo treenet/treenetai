@@ -2,7 +2,7 @@
 
 **Purpose**: This file documents project-specific context details to help maintain continuity across sessions. Reference this document at the start of any new session.
 
-**Last Updated**: 2026-01-12 (Gap types documentation, constrained RH visualization)
+**Last Updated**: 2026-01-13 (2023-2024 reconstruction preparation, RH analysis, visualizations)
 
 ---
 
@@ -20,6 +20,76 @@ This ensures continuity across sessions and prevents rediscovery of the same iss
 ---
 
 ## Change Log
+
+### 2026-01-13 - 2023-2024 Reconstruction Analysis (IN PROGRESS)
+- **Goal**: Reconstruct 2023-2024 data for 10 randomly selected combinations from raw sensor data
+- **Motivation**: Test years (2023-2024) have no LM ground truth for T/RH, only raw L2 data
+- **Key findings**:
+  - Site 86 sensors do NOT have 2023-2024 data (only up to 2022)
+  - Found **1471 valid combinations** across sites with 2023-2024 data
+  - Sites with data: 3, 4, 10, 22, 32, 33, 36, 51, 134 and others
+
+- **10 Selected Combinations** (seed=42):
+  | # | Combo | Site |
+  |---|-------|------|
+  | 1 | site51_T639_H616_D667 | 51 |
+  | 2 | site36_T332_H326_D276 | 36 |
+  | 3 | site36_T331_H325_D281 | 36 |
+  | 4 | site36_T334_H327_D273 | 36 |
+  | 5 | site36_T333_H330_D341 | 36 |
+  | 6 | site36_T333_H329_D271 | 36 |
+  | 7 | site36_T332_H328_D281 | 36 |
+  | 8 | site36_T332_H325_D284 | 36 |
+  | 9 | site51_T640_H618_D662 | 51 |
+  | 10 | site51_T636_H615_D663 | 51 |
+
+- **Intermediate Timeseries Created** (✅ COMPLETED):
+  - Directory: `/home/lukovic/data/treenet/reconstruction_2023_2024/intermediate_timeseries/`
+  - 10 `.ftr` files successfully created
+  - Date range: 2022-11-01 to 2024-12-31 (Nov 2022 needed for alignment)
+  - Each file contains: ts, temp_treenet, rh_treenet, stem, meteo columns (tas, tasmax, tasmin, rh, vpd, gh, pr), doy
+
+- **Reconstruction** (⏳ PENDING - run next session):
+  - Output dir: `/home/lukovic/data/treenet/reconstruction_2023_2024/reconstructions/`
+  - Strategy: 30-day sliding windows, 24h stride, overlap averaging
+  - Stem alignment: Use Nov-Dec 2022 overlap to compute offset
+  - Model: Unconstrained attention model (20260111_152352_segment_norm_attention)
+
+- **To Continue Next Session**:
+  1. Run reconstruction script (code ready, just execute)
+  2. Generate visualizations
+  3. Calculate and compare metrics
+
+### 2026-01-13 - RH Poor Prediction Analysis
+- **Question investigated**: "Why is the relative humidity so poorly predicted?"
+- **Key finding**: Model DEGRADES high-quality input RH
+  - Input RH correlates 0.89-0.94 with ground truth LM
+  - Model output correlates only 0.31-0.78 with ground truth
+  - 15-58% of variance lost through the model
+
+- **Per-Site Analysis (Input→LM vs Model→LM)**:
+  | Site | Input→LM R² | Model R² | Variance Lost |
+  |------|-------------|----------|---------------|
+  | Site22 | 0.89 | 0.31-0.34 | 55-58% |
+  | Site72 | 0.94 | 0.59-0.65 | 30-35% |
+  | Site86 | 0.93-0.94 | 0.43-0.78 | 16-51% |
+
+- **Possible causes**:
+  1. Segment normalization loses absolute RH information
+  2. Model architecture optimized for stem (3-channel combined loss)
+  3. Site-specific calibration needed but model uses universal approach
+  4. Training data may have RH quality issues
+
+### 2026-01-13 - Visualization Improvements
+- **Box-and-whisker plots created**:
+  - `/home/lukovic/data/treenet/test_set_evaluation_unconstrained_2020_2021_aligned/boxplot_mse_correlation_2020_2021.png`
+  - `/home/lukovic/data/treenet/test_set_evaluation_unconstrained_2020_2021_aligned/boxplot_mse_nmse_correlation_2020_2021.png`
+  - Shows MSE, NMSE (1-R²), and Correlation for all 3 channels
+  
+- **Reconstruction Pipeline Diagram**:
+  - `/home/lukovic/data/treenet/test_set_evaluation_unconstrained_2020_2021_aligned/reconstruction_pipeline_diagram.png` (v1, v2)
+  - `/home/lukovic/data/treenet/test_set_evaluation_unconstrained_2020_2021_aligned/reconstruction_slide.png` (presentation format, 16:9)
+  - Diagrams show: Input processing → Model inference → Overlap averaging → Stem alignment
 
 ### 2026-01-12 - Comprehensive Test Set Evaluation (2020-2021 with Stem Alignment)
 - **Re-evaluated with stem alignment** for proper scale calibration
@@ -1524,7 +1594,7 @@ SLIDING WINDOWS (30-day each, 24-hour stride):
 
 PER-WINDOW PROCESSING:
 ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
-│ Segment Normalize│ → │ Model Predict    │ → │ Denormalize      │
+│ Segment Normalize│ →  │ Model Predict    │ →  │ Denormalize      │
 │ (local min/max)  │    │ (4320→720)       │    │ (input params)   │
 └──────────────────┘    └──────────────────┘    └──────────────────┘
 
@@ -2572,6 +2642,305 @@ If implementing the alternative approach:
 
 9. **☐ Yearly segment processing (Stage C)**
    - Research feasibility given ground truth limitations
+
+---
+
+## 29. Session Continuation: 2023-2024 Reconstruction
+
+**STATUS**: Intermediate timeseries created, reconstruction pending
+
+### What Was Done
+1. ✅ Analyzed RH poor prediction (model degrades input quality)
+2. ✅ Created MSE/NMSE/Correlation boxplots
+3. ✅ Created reconstruction pipeline diagrams
+4. ✅ Scanned 2023-2024 data availability (1471 valid combinations found)
+5. ✅ Selected 10 random combinations (seed=42)
+6. ✅ Created 10 intermediate timeseries in `/home/lukovic/data/treenet/reconstruction_2023_2024/intermediate_timeseries/`
+
+### What Needs to Be Done Next Session
+
+**Run the reconstruction script**:
+```bash
+cd /home/lukovic/codes/treenetai/pipeline_v2 && source /home/lukovic/pyenv/lamella/bin/activate
+# Then run the reconstruction (see ready-to-run code below)
+```
+
+### Ready-to-Run Reconstruction Code
+
+```python
+"""
+Reconstruct 2023-2024 for 10 combinations with stem alignment.
+Run this in the pipeline_v2 directory with lamella venv activated.
+"""
+import sys
+sys.path.insert(0, '.')
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+
+import numpy as np
+import pandas as pd
+import tensorflow as tf
+from pathlib import Path
+from src.models.tcn import TCNBlock, PositionalEncoding
+
+# Constants
+SEGMENT_DAYS = 30
+INPUT_STEPS_PER_HOUR = 6  # 10-min samples
+OUTPUT_STEPS_PER_HOUR = 1  # hourly output
+INPUT_SAMPLES = SEGMENT_DAYS * 24 * INPUT_STEPS_PER_HOUR  # 4320
+OUTPUT_SAMPLES = SEGMENT_DAYS * 24 * OUTPUT_STEPS_PER_HOUR  # 720
+
+INPUT_CHANNELS = ['temp_treenet', 'rh_treenet', 'stem',
+                  'tas', 'tasmax', 'tasmin', 'rh', 'vpd', 'gh', 'pr', 'doy']
+OUTPUT_CHANNELS = ['temp', 'rh', 'stem']
+
+# Custom loss for loading
+def constrained_hourly_loss(y_true, y_pred):
+    return tf.reduce_mean(tf.abs(y_true - y_pred))
+
+# Load model
+model_path = '/storage/lukovic/Data/FORWARDS/treenet/processed/swiss_segment_norm_all_combos/experiments/20260111_152352_segment_norm_attention/best_model.keras'
+model = tf.keras.models.load_model(
+    model_path,
+    custom_objects={
+        'TCNBlock': TCNBlock,
+        'PositionalEncoding': PositionalEncoding,
+        'constrained_hourly_loss': constrained_hourly_loss
+    }
+)
+print(f"Model loaded: {model_path}")
+
+# Directories
+intermediate_dir = Path('/home/lukovic/data/treenet/reconstruction_2023_2024/intermediate_timeseries')
+output_dir = Path('/home/lukovic/data/treenet/reconstruction_2023_2024/reconstructions')
+output_dir.mkdir(parents=True, exist_ok=True)
+
+
+def prepare_segment(df_segment):
+    """Prepare input array with segment-level normalization."""
+    input_data = df_segment[INPUT_CHANNELS].values.astype(np.float32)
+    
+    if len(input_data) != INPUT_SAMPLES:
+        return None, None, None, False
+    
+    # Segment-level normalization
+    norm_params = {}
+    for i, col in enumerate(INPUT_CHANNELS):
+        min_val = np.nanmin(input_data[:, i])
+        max_val = np.nanmax(input_data[:, i])
+        diff = max_val - min_val
+        norm_params[col] = {'min': float(min_val), 'max': float(max_val)}
+        
+        if diff > 1e-10:
+            input_data[:, i] = (input_data[:, i] - min_val) / diff
+        else:
+            input_data[:, i] = 0.0
+    
+    # Create mask (1 where valid, 0 where NaN)
+    mask = (~np.isnan(input_data)).astype(np.float32)
+    input_array = np.nan_to_num(input_data, nan=0.0)
+    
+    return input_array, mask, norm_params, True
+
+
+def denormalize_output(output, norm_params):
+    """Denormalize output using input parameters."""
+    output_denorm = np.zeros_like(output)
+    input_to_output = ['temp_treenet', 'rh_treenet', 'stem']
+    
+    for i, input_ch in enumerate(input_to_output):
+        if input_ch in norm_params:
+            min_val = norm_params[input_ch]['min']
+            max_val = norm_params[input_ch]['max']
+            if max_val - min_val > 1e-10:
+                output_denorm[:, i] = output[:, i] * (max_val - min_val) + min_val
+            else:
+                output_denorm[:, i] = min_val
+    
+    return output_denorm
+
+
+def reconstruct_combination(df, stride_hours=24):
+    """Reconstruct time series for a single combination."""
+    stride_samples = stride_hours * INPUT_STEPS_PER_HOUR
+    n_windows = (len(df) - INPUT_SAMPLES) // stride_samples + 1
+    
+    results = []
+    for i in range(n_windows):
+        start_idx = i * stride_samples
+        end_idx = start_idx + INPUT_SAMPLES
+        
+        if end_idx > len(df):
+            break
+        
+        segment_df = df.iloc[start_idx:end_idx]
+        input_arr, mask, norm_params, is_valid = prepare_segment(segment_df)
+        
+        if not is_valid:
+            continue
+        
+        # Predict
+        pred = model.predict(
+            [np.expand_dims(input_arr, 0), np.expand_dims(mask, 0)],
+            verbose=0
+        )
+        
+        # Model outputs: [10min_output, hourly_output] - we use hourly
+        if isinstance(pred, list):
+            pred_hourly = pred[1][0]
+        else:
+            pred_hourly = pred[0]
+        
+        # Denormalize
+        pred_hourly = denormalize_output(pred_hourly, norm_params)
+        
+        # Get timestamps for hourly output
+        segment_start = segment_df['ts'].iloc[0]
+        hourly_times = pd.date_range(start=segment_start, periods=OUTPUT_SAMPLES, freq='1H')
+        
+        segment_results = pd.DataFrame({
+            'ts': hourly_times,
+            'temp_pred': pred_hourly[:, 0],
+            'rh_pred': pred_hourly[:, 1],
+            'stem_pred': pred_hourly[:, 2]
+        })
+        results.append(segment_results)
+    
+    if not results:
+        return None
+    
+    # Combine and average overlapping predictions
+    all_results = pd.concat(results, ignore_index=True)
+    reconstructed = all_results.groupby('ts').agg({
+        'temp_pred': 'mean',
+        'rh_pred': 'mean',
+        'stem_pred': 'mean'
+    }).reset_index()
+    
+    return reconstructed
+
+
+# Process each file
+all_metrics = []
+for ftr_file in sorted(intermediate_dir.glob('*.ftr')):
+    combo_name = ftr_file.stem
+    print(f"\n{'='*100}")
+    print(f"Processing: {combo_name}")
+    print(f"{'='*100}")
+    
+    # Load data
+    data = pd.read_feather(ftr_file)
+    data['ts'] = pd.to_datetime(data['ts'])
+    
+    print(f"Data: {data['ts'].min()} to {data['ts'].max()} ({len(data):,} rows)")
+    
+    # Reconstruct
+    print("  Running reconstruction...")
+    recon = reconstruct_combination(data)
+    
+    if recon is None:
+        print("  ✗ Reconstruction failed")
+        continue
+    
+    print(f"  Reconstructed: {len(recon):,} hourly samples")
+    
+    # Get ground truth (resample to hourly)
+    data_hourly = data.set_index('ts').resample('1H').mean()
+    
+    # Align stem using Nov-Dec 2022
+    align_start = '2022-11-01'
+    align_end = '2023-01-01'
+    
+    recon_align = recon[(recon['ts'] >= align_start) & (recon['ts'] < align_end)].set_index('ts')
+    gt_align = data_hourly.loc[align_start:align_end, 'stem'].dropna()
+    
+    common_idx = recon_align.index.intersection(gt_align.index)
+    if len(common_idx) > 100:
+        pred_stem = recon_align.loc[common_idx, 'stem_pred'].values
+        gt_stem = gt_align.loc[common_idx].values
+        
+        offset = np.mean(gt_stem - pred_stem)
+        recon['stem_pred_aligned'] = recon['stem_pred'] + offset
+        print(f"  Stem alignment: offset = {offset:.2f} µm ({len(common_idx):,} alignment samples)")
+    else:
+        print(f"  Warning: Only {len(common_idx)} alignment samples")
+        recon['stem_pred_aligned'] = recon['stem_pred']
+        offset = 0
+    
+    # Add ground truth
+    recon = recon.set_index('ts')
+    recon['temp_gt'] = data_hourly.loc[recon.index, 'temp_treenet']
+    recon['rh_gt'] = data_hourly.loc[recon.index, 'rh_treenet']
+    recon['stem_gt'] = data_hourly.loc[recon.index, 'stem']
+    recon = recon.reset_index()
+    
+    # Save
+    output_file = output_dir / f'{combo_name}_reconstruction.ftr'
+    recon.to_feather(output_file)
+    print(f"  ✓ Saved: {output_file.name}")
+    
+    # Calculate metrics for 2023-2024
+    eval_start = '2023-01-01'
+    eval_end = '2025-01-01'
+    eval_df = recon[(recon['ts'] >= eval_start) & (recon['ts'] < eval_end)]
+    
+    combo_metrics = {'combo': combo_name}
+    print(f"\n  Metrics for 2023-2024:")
+    
+    for channel, pred_col, gt_col in [
+        ('T', 'temp_pred', 'temp_gt'),
+        ('RH', 'rh_pred', 'rh_gt'),
+        ('Stem', 'stem_pred_aligned', 'stem_gt')
+    ]:
+        mask = eval_df[pred_col].notna() & eval_df[gt_col].notna()
+        if mask.sum() > 0:
+            pred = eval_df.loc[mask, pred_col].values
+            gt = eval_df.loc[mask, gt_col].values
+            
+            mse = np.mean((pred - gt) ** 2)
+            corr = np.corrcoef(pred, gt)[0, 1]
+            r2 = corr ** 2
+            
+            combo_metrics[f'{channel}_MSE'] = mse
+            combo_metrics[f'{channel}_R2'] = r2
+            combo_metrics[f'{channel}_Corr'] = corr
+            combo_metrics[f'{channel}_N'] = int(mask.sum())
+            
+            print(f"    {channel}: MSE={mse:.2f}, R²={r2:.3f}, Corr={corr:.3f} (n={mask.sum():,})")
+    
+    all_metrics.append(combo_metrics)
+
+# Summary
+print(f"\n\n{'='*100}")
+print("SUMMARY METRICS ACROSS ALL COMBINATIONS")
+print(f"{'='*100}")
+
+metrics_df = pd.DataFrame(all_metrics)
+print(metrics_df.to_string())
+
+# Save summary
+metrics_df.to_csv(output_dir / 'metrics_summary.csv', index=False)
+print(f"\nSaved metrics to: {output_dir / 'metrics_summary.csv'}")
+```
+
+### Key Technical Details
+
+**Intermediate Timeseries Creation**:
+- Used `DataLoaders` from `src.data.loaders`:
+  - `load_thermometer_l1(sensor_id)` - raw temperature
+  - `load_hygrometer_l1(sensor_id)` - raw humidity
+  - `load_dendrometer_l2(sensor_id)` - stem data
+  - `load_meteotest_data(site_id)` - daily meteo (returns df with 'ts' column)
+- Used `DataProcessor` from `src.data.processors`:
+  - `process_sensor_dataframe(df, keep_all_columns=True)` - sets datetime index
+- **Important**: Remove timezone info before joining meteo (tz-naive vs tz-aware conflict)
+
+**Meteo Data**:
+- Location: `/storage/lukovic/Data/FORWARDS/treenet/server_data/meteo_data/site_*.csv`
+- 162 files available
+- Columns: ['ts', 'tas', 'tasmax', 'tasmin', 'rh', 'vpd', 'gh', 'pr']
+- Daily resolution - needs resampling to 10-min with ffill
 
 ---
 
